@@ -1,0 +1,21 @@
+@import 'tailwindcss';
+
+@theme {
+  --color-wa-header: #075e54;
+  --color-wa-out: #d9fdd3;
+  --color-wa-bg: #efeae2;
+  --color-wa-send: #00a884;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f0f2f5;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  color: #111b21;
+}

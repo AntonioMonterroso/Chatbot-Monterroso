@@ -87,3 +87,29 @@ test("preámbulo y fecha", () => {
   assert.equal(p("ayer vendi 500").ayer, true);
   assert.equal(p("vendi 500").ayer, undefined);
 });
+
+import { parsearVarios } from "../src/parser.js";
+
+test("varios movimientos en un mensaje", () => {
+  const r = parsearVarios("vendi 100 y gaste 40 en hielo");
+  assert.deepEqual(r.map((x) => [x.tipo, x.monto]), [["venta", 100], ["gasto", 40]]);
+
+  const items = parsearVarios("vendi 3 pollos a 45 y 2 cervezas a 20");
+  assert.deepEqual(items.map((x) => x.monto), [135, 40]);
+  assert.equal(items[1].tipo, "venta"); // hereda el verbo
+
+  assert.deepEqual(parsearVarios("vendi 100, 200 y 300").map((x) => x.monto), [100, 200, 300]);
+  assert.deepEqual(parsearVarios("vendi 100\ngaste 50 a Don Pepe").map((x) => x.tipo), ["venta", "gasto"]);
+  assert.equal(parsearVarios("vendi dos mil y quinientos").length, 1);
+  assert.equal(parsearVarios("vendi dos mil y quinientos")[0].monto, 2500);
+  assert.equal(parsearVarios("Q 75 vendi").length, 1); // monto antes del verbo
+  assert.equal(parsearVarios("compre 80 tomates a Don Pepe")[0].proveedor, "Don Pepe");
+});
+
+test("corregir y últimos", () => {
+  assert.deepEqual(p("corrige 120"), { tipo: "corregir", monto: 120 });
+  assert.deepEqual(p("era 150"), { tipo: "corregir", monto: 150 });
+  assert.equal(p("corrige").tipo, "sinmonto");
+  assert.equal(p("ultimos").tipo, "ultimos");
+  assert.equal(p("mis movimientos").tipo, "ultimos");
+});

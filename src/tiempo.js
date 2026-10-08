@@ -25,3 +25,19 @@ export function rango(periodo, ahora = new Date()) {
       return { desde: hoy, hasta: hoy, titulo: "Resumen de hoy" };
   }
 }
+
+export function diasEntre(desde, hasta) {
+  return Math.round((new Date(`${hasta}T00:00:00Z`) - new Date(`${desde}T00:00:00Z`)) / 86_400_000) + 1;
+}
+
+export const horaLocal = (iso) => aLocal(new Date(iso)).toISOString().slice(11, 16);
+
+// "lunes 5" a partir de "2026-10-05"
+export const nombreDia = (dia) =>
+  new Date(`${dia}T12:00:00Z`).toLocaleDateString("es-GT", { weekday: "long", day: "numeric", timeZone: "UTC" });
+
+// Ventana anterior de la misma duración, para comparar.
+export function rangoAnterior({ desde, hasta }) {
+  const n = diasEntre(desde, hasta);
+  return { desde: sumarDias(desde, -n), hasta: sumarDias(desde, -1) };
+}

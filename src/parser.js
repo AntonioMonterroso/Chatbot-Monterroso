@@ -15,6 +15,8 @@ const COMANDOS = new Map([
   ...conValor("resumen", "resumen", "cierre", "reporte", "informe", "balance", "cuanto", "cuantos"),
   ...conValor("proveedores", "proveedores", "proveedor"),
   ...conValor("deshacer", "deshacer", "borrar", "borra", "anular", "anula", "cancelar", "cancela", "elimina", "eliminar", "equivoque"),
+  ...conValor("corregir", "corrige", "corregir", "correccion", "cambia", "cambiar", "modifica", "modificar", "era"),
+  ...conValor("ultimos", "ultimos", "ultimas", "movimientos", "historial", "lista"),
 ]);
 const AYUDA = tabla("ayuda", "ayudame", "menu", "help", "hola", "buenas", "buenos", "comandos", "instrucciones");
 const PERIODOS = new Map([...conValor("ayer", "ayer"), ...conValor("semana", "semana", "semanal"), ...conValor("mes", "mes", "mensual"), ...conValor("hoy", "hoy")]);
@@ -93,6 +95,13 @@ export function parsearMensaje(texto) {
   if (cmd === "resumen") return { tipo: "resumen", periodo };
   if (cmd === "proveedores") return { tipo: "proveedores" };
   if (cmd === "deshacer") return { tipo: "deshacer" };
+  if (cmd === "ultimos") return { tipo: "ultimos" };
+  if (cmd === "corregir") {
+    const numeros = tokens.filter(esNumero);
+    return numeros.length && numeros.at(-1).valor > 0
+      ? { tipo: "corregir", monto: redondear(numeros.at(-1).valor) }
+      : { tipo: "sinmonto", venta: "corregir" };
+  }
   if (tokens.some((t) => /^equivoque$/.test(t.n))) return { tipo: "deshacer" };
 
   // 2. Venta o gasto: el verbo puede estar en las primeras palabras
@@ -194,6 +203,54 @@ export function parsearMensaje(texto) {
   detalle = detalle.replace(/[.,;:!¡?¿]+$/g, "").trim();
 
   return { tipo, monto, detalle, proveedor, metodo, ...(ayer && { ayer: true }) };
+}
+
+// "vendí 100 y gasté 50", "vendí 3 pollos a 45 y 2 cervezas a 20", varias líneas...
+// Devuelve una lista con un resultado por cada movimiento que encuentre.
+export function parsearVarios(texto) {
+  const esVerbo = (n) => !buscar(n, SUSTANTIVOS, false) && !!buscar(n, VERBOS);
+  const empiezaConDigito = (n) => /^[q$]?\.?\d/.test(n);
+  const empiezaConNumero = (n) => empiezaConDigito(n) || !!valorPalabraNumero(n);
+  const resultados = [];
+
+  for (const linea of texto.split(/[\n;]+/)) {
+    const palabras = linea.trim().split(/\s+/).filter(Boolean);
+    const segmentos = [[]];
+    let verbo = null; // última palabra-verbo del segmento actual
+    let conNumero = false;
+
+    for (let i = 0; i < palabras.length; i++) {
+      const w = palabras[i];
+      const n = normalizarToken(w);
+      const actual = segmentos.at(-1);
+      // solo un dígito indica un ítem nuevo: "dos mil y quinientos" es un solo monto
+      const sigNum = palabras[i + 1] && empiezaConDigito(normalizarToken(palabras[i + 1]));
+      const esConector = n === "y" || w.endsWith(",");
+
+      if (esVerbo(n) && verbo) {
+        segmentos.push([w]); // segundo verbo: nuevo movimiento
+        verbo = w;
+        conNumero = false;
+        continue;
+      }
+      if (esVerbo(n)) verbo = w;
+      if (empiezaConNumero(n)) conNumero = true;
+      // "... y 2 cervezas a 20": el nuevo movimiento hereda el verbo
+      if (esConector && verbo && conNumero && (n === "y" ? sigNum : sigNum && w.endsWith(","))) {
+        if (n !== "y") actual.push(w.replace(/,$/, ""));
+        segmentos.push([verbo]);
+        conNumero = false;
+        continue;
+      }
+      actual.push(w);
+    }
+
+    for (const seg of segmentos) {
+      const t = seg.join(" ").replace(/\s+(y|e)$/i, "").trim();
+      if (t) resultados.push(parsearMensaje(t));
+    }
+  }
+  return resultados.length ? resultados : [{ tipo: "desconocido" }];
 }
 
 // Valida lo que devuelve la IA antes de usarlo (nunca confiar en el JSON a ciegas).

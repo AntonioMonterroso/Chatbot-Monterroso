@@ -35,6 +35,21 @@ export function crearStore(ruta = "data/db.json") {
       }
       return null;
     },
+    ultimos(usuario, n = 5) {
+      return datos.movimientos.filter((m) => m.usuario === usuario).slice(-n).reverse();
+    },
+    corregirUltimo(usuario, monto) {
+      for (let i = datos.movimientos.length - 1; i >= 0; i--) {
+        const m = datos.movimientos[i];
+        if (m.usuario === usuario) {
+          const antes = m.monto;
+          m.monto = monto;
+          guardar();
+          return { mov: m, antes };
+        }
+      }
+      return null;
+    },
     // desde/hasta: días locales "YYYY-MM-DD", inclusivos
     entre(usuario, desde, hasta) {
       return datos.movimientos.filter((m) => {

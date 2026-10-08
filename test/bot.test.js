@@ -130,3 +130,53 @@ test("'ayer vendí 500' se anota con la fecha de ayer", () => {
   assert.match(responder({ usuario: U, texto: "ayer" }, store, hoy), /Ventas: Q500.00/);
   assert.match(responder({ usuario: U, texto: "resumen" }, store, hoy), /Sin movimientos/);
 });
+
+test("varios movimientos en un mensaje se anotan todos", () => {
+  const store = crearStore(null);
+  const r = responder({ usuario: U, texto: "vendi 100 y gaste 40 en hielo" }, store);
+  assert.match(r, /2 movimientos/);
+  assert.match(r, /Venta de Q100.00/);
+  assert.match(r, /Gasto de Q40.00 \(hielo\)/);
+  assert.match(responder({ usuario: U, texto: "resumen" }, store), /Ganancia: Q60.00/);
+});
+
+test("corregir cambia el monto del último movimiento", () => {
+  const store = crearStore(null);
+  assert.match(responder({ usuario: U, texto: "corrige 120" }, store), /No tengo nada/);
+  responder({ usuario: U, texto: "vendi 150" }, store);
+  assert.match(responder({ usuario: U, texto: "corrige 120" }, store), /Venta de Q120.00.*antes Q150.00/);
+  assert.match(responder({ usuario: U, texto: "resumen" }, store), /Ventas: Q120.00/);
+});
+
+test("últimos movimientos", () => {
+  const store = crearStore(null);
+  const ahora = new Date("2026-10-08T18:00:00Z");
+  assert.match(responder({ usuario: U, texto: "ultimos" }, store, ahora), /Todavía no/);
+  responder({ usuario: U, texto: "vendi 100" }, store, ahora);
+  responder({ usuario: U, texto: "gaste 30 en hielo" }, store, ahora);
+  const r = responder({ usuario: U, texto: "ultimos" }, store, ahora);
+  assert.match(r, /1\. Gasto de Q30.00 \(hielo\) · hoy 12:00/);
+  assert.match(r, /2\. Venta de Q100.00/);
+});
+
+test("el resumen compara con el período anterior y avisa si se gastó de más", () => {
+  const store = crearStore(null);
+  const ayer = new Date("2026-10-07T18:00:00Z");
+  const hoy = new Date("2026-10-08T18:00:00Z");
+  responder({ usuario: U, texto: "vendi 200" }, store, ayer);
+  responder({ usuario: U, texto: "vendi 300" }, store, hoy);
+  assert.match(responder({ usuario: U, texto: "resumen" }, store, hoy), /vs ayer: ▲ 50% \(antes Q200.00\)/);
+
+  responder({ usuario: U, texto: "gaste 900 a Don Pepe" }, store, hoy);
+  assert.match(responder({ usuario: U, texto: "resumen" }, store, hoy), /gastó más de lo que se vendió/);
+});
+
+test("la semana muestra mejor día y promedio", () => {
+  const store = crearStore(null);
+  const hoy = new Date("2026-10-08T18:00:00Z");
+  responder({ usuario: U, texto: "vendi 100" }, store, new Date("2026-10-06T18:00:00Z"));
+  responder({ usuario: U, texto: "vendi 500" }, store, new Date("2026-10-07T18:00:00Z"));
+  const r = responder({ usuario: U, texto: "semana" }, store, hoy);
+  assert.match(r, /Mejor día: miércoles 7 \(Q500.00\)/);
+  assert.match(r, /Promedio por día con ventas: Q300.00/);
+});

@@ -4,20 +4,29 @@ Asistente de WhatsApp para restaurantes pequeños (Guatemala primero). El dueño
 
 Estado: en construcción (versión mínima).
 
+## Qué hace
+
+- **Texto**: `vendí 250` · `vendí 3 pollos a 45` · `vendí 500 con tarjeta` · `gasté 100 en pollo` · `compré 80 tomates a Don Pepe` · `pagué 500 a Don Pepe`
+- **Reportes**: `resumen` · `ayer` · `semana` · `mes` · `proveedores`
+- **Errores**: `deshacer` borra lo último que anotó ese usuario
+- **Nota de voz**: se transcribe con Whisper y se trata como texto (necesita `OPENAI_API_KEY`)
+- **Foto de factura**: Claude lee total, comercio y detalle y anota el gasto (necesita `ANTHROPIC_API_KEY`)
+- **Resumen nocturno**: cada día a la hora `RESUMEN_HORA` (hora de Guatemala) a quien tuvo movimientos
+
+Sin las llaves de voz/foto, el bot avisa al usuario que escriba el mensaje.
+
 ## Uso
 
 ```
 cp .env.example .env   # llena los valores de WhatsApp Cloud API
 npm start              # webhook en :3000/webhook
-npm run chat         # probar por terminal, sin WhatsApp
+npm run chat           # probar por terminal, sin WhatsApp
 npm test
 ```
 
-Mensajes de texto que entiende por ahora: `vendí 250`, `gasto 100 pollo`, `compré 80 tomates a Don Pepe`, `resumen`.
-
 ## Pendiente
 
-- Voz (transcripción) y fotos (facturas/recibos)
-- Proveedores como entidad propia
-- Resumen automático cada noche (hoy solo con `resumen`)
+- Probar voz, fotos y envío real contra WhatsApp (hoy cubiertos solo con pruebas simuladas)
+- Mensajes de plantilla: WhatsApp solo deja escribir primero al usuario dentro de 24 h de su último mensaje; para el resumen nocturno fuera de esa ventana hace falta una plantilla aprobada por Meta
 - Base de datos real (hoy un JSON en `data/`)
+- Varios restaurantes / varios empleados por restaurante

@@ -1,10 +1,23 @@
 import { createServer } from "node:http";
 import { crearStore } from "./store.js";
-import { responder } from "./bot.js";
-import { extraerMensajes, firmaValida, enviarTexto } from "./whatsapp.js";
+import { procesar } from "./bot.js";
+import { extraerMensajes, firmaValida, enviarTexto, descargarMedia } from "./whatsapp.js";
+import { transcribirAudio, leerRecibo } from "./ia.js";
+import { iniciarResumenNocturno } from "./scheduler.js";
 
-export function crearServidor({ store, env = process.env, enviar = enviarTexto } = {}) {
+// Voz y foto solo se activan si hay llave configurada.
+function depsDesdeEnv(env) {
+  const deps = {};
+  if (env.WHATSAPP_ACCESS_TOKEN) deps.descargarMedia = (id) => descargarMedia(id, env);
+  if (env.OPENAI_API_KEY) deps.transcribirAudio = (m) => transcribirAudio(m, env);
+  if (env.ANTHROPIC_API_KEY) deps.leerRecibo = (m) => leerRecibo(m, env);
+  return deps;
+}
+
+export function crearServidor({ store, env = process.env, enviar = enviarTexto, deps } = {}) {
   store ??= crearStore();
+  deps ??= depsDesdeEnv(env);
+  const vistos = new Set(); // Meta reintenta entregas: evita anotar dos veces
 
   return createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
@@ -31,12 +44,24 @@ export function crearServidor({ store, env = process.env, enviar = enviarTexto }
         return;
       }
       res.writeHead(200).end(); // responder rápido a Meta
+      let mensajes = [];
       try {
-        for (const msg of extraerMensajes(JSON.parse(crudo.toString()))) {
-          await enviar(msg.usuario, responder(msg, store));
-        }
+        mensajes = extraerMensajes(JSON.parse(crudo.toString()));
       } catch (e) {
-        console.error("Error procesando mensaje:", e);
+        console.error("Payload inválido:", e);
+      }
+      for (const msg of mensajes) {
+        if (msg.id && vistos.has(msg.id)) continue;
+        if (msg.id) {
+          vistos.add(msg.id);
+          if (vistos.size > 1000) vistos.delete(vistos.values().next().value);
+        }
+        try {
+          await enviar(msg.usuario, await procesar(msg, store, deps));
+        } catch (e) {
+          console.error("Error procesando mensaje:", e);
+          await enviar(msg.usuario, "Tuve un problema procesando eso. Intenta de nuevo, por favor.").catch(() => {});
+        }
       }
       return;
     }
@@ -46,5 +71,8 @@ export function crearServidor({ store, env = process.env, enviar = enviarTexto }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const port = process.env.PORT ?? 3000;
-  crearServidor().listen(port, () => console.log(`Monterroso Chat escuchando en :${port}`));
+  const store = crearStore();
+  const servidor = crearServidor({ store });
+  servidor.listen(port, () => console.log(`Monterroso Chat escuchando en :${port}`));
+  iniciarResumenNocturno({ store, enviar: enviarTexto, hora: Number(process.env.RESUMEN_HORA ?? 21) });
 }

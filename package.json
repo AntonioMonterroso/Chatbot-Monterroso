@@ -1,0 +1,12 @@
+{
+  "name": "chatbot-monterroso",
+  "version": "0.1.0",
+  "description": "Asistente de WhatsApp para restaurantes pequeños",
+  "type": "module",
+  "private": true,
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  }
+}

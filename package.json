@@ -7,6 +7,7 @@
   "engines": { "node": ">=20" },
   "scripts": {
     "start": "node src/server.js",
+    "chat": "node scripts/chat.js",
     "test": "node --test"
   }
 }

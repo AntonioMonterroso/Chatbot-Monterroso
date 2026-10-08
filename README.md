@@ -9,6 +9,7 @@ Estado: en construcción (versión mínima).
 ```
 cp .env.example .env   # llena los valores de WhatsApp Cloud API
 npm start              # webhook en :3000/webhook
+npm run chat         # probar por terminal, sin WhatsApp
 npm test
 ```
 

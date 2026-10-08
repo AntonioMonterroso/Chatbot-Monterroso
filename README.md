@@ -9,12 +9,15 @@ Estado: en construcción (versión mínima).
 - **Texto** (tolera faltas de ortografía, mayúsculas y jerga: `bendi 250`, `gaste cien en cebolla`, `vendi 2k`, `ayer vendi 500`): `vendí 250` · `vendí 3 pollos a 45` · `vendí 500 con tarjeta` · `gasté 100 en pollo` · `compré 80 tomates a Don Pepe` · `pagué 500 a Don Pepe`
 - **Varias cosas a la vez**: `vendí 100 y gasté 40 en hielo`, `vendí 3 pollos a 45 y 2 cervezas a 20`, o una por línea
 - **Reportes**: `resumen` · `ayer` · `semana` · `mes` · `proveedores` · `últimos`. Comparan con el período anterior (▲/▼), la semana y el mes muestran mejor día y promedio, y avisan si se gastó más de lo vendido
+- **Fiado**: `le fié 100 a Marta`, `Marta me pagó 50`, `quién me debe`. El fiado cuenta como venta y el cobro no se cuenta dos veces
+- **Crédito con proveedores**: `compré 500 a Don Pepe al crédito`; luego `pagué 200 a Don Pepe` descuenta la deuda en vez de duplicar el gasto. `debo` muestra lo que debes
+- **Hora del resumen**: cada quien la elige con `resumen a las 8` (o `no quiero resumen`)
 - **Corregir**: `corrige 120` cambia el monto del último movimiento
 - **Errores**: `deshacer` borra lo último que anotó ese usuario
 - **Respaldo de IA**: si el bot no entiende un mensaje, se lo pregunta a Claude (necesita `ANTHROPIC_API_KEY`); la respuesta se valida antes de anotar nada
 - **Nota de voz**: se transcribe con Whisper y se trata como texto (necesita `OPENAI_API_KEY`)
 - **Foto de factura**: Claude lee total, comercio y detalle y anota el gasto (necesita `ANTHROPIC_API_KEY`)
-- **Resumen nocturno**: cada día a la hora `RESUMEN_HORA` (hora de Guatemala) a quien tuvo movimientos
+- **Resumen nocturno**: cada día a la hora que cada usuario elige (por defecto `RESUMEN_HORA`, hora de Guatemala), a quien tuvo movimientos
 
 Sin las llaves de voz/foto, el bot avisa al usuario que escriba el mensaje.
 

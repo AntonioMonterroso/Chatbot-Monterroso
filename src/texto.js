@@ -78,3 +78,14 @@ export function numeroDePalabras(palabras) {
   }
   return total + actual;
 }
+
+// ---- Nombres de personas ("Doña Marta López" y "marta" son la misma cuenta) ----
+const TITULOS = new Set(["don", "dona", "sr", "sra", "senor", "senora", "doctor", "dr", "dra", "licenciado", "lic"]);
+
+export function clavePersona(nombre) {
+  const partes = sinAcentos(nombre.toLowerCase())
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .filter((p) => p && !TITULOS.has(p));
+  return clave(partes[0] ?? nombre);
+}

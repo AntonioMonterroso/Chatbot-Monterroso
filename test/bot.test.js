@@ -84,10 +84,15 @@ test("resumen nocturno: una vez al día y solo a quien tuvo movimientos", async 
   responder({ usuario: U, texto: "vendí 50" }, store, new Date("2026-10-08T18:00:00Z"));
   responder({ usuario: "sinhoy", texto: "vendí 10" }, store, new Date("2026-10-01T18:00:00Z"));
   const enviados = [];
-  await enviarResumenes(store, async (...a) => enviados.push(a), noche);
+  await enviarResumenes(store, async (...a) => enviados.push(a), noche, 20);
   assert.equal(enviados.length, 1);
   assert.equal(enviados[0][0], U);
-  assert.equal(store.meta.get("ultimoResumen"), "2026-10-08");
+  assert.equal(store.meta.get(`ultimoResumen:${U}`), "2026-10-08");
+  assert.match(enviados[0][1], /Cierre del día 2026-10-08/);
+
+  // no se repite el mismo día
+  await enviarResumenes(store, async (...a) => enviados.push(a), noche, 20);
+  assert.equal(enviados.length, 1);
 });
 
 import { validarInterpretacion } from "../src/parser.js";
@@ -179,4 +184,59 @@ test("la semana muestra mejor día y promedio", () => {
   const r = responder({ usuario: U, texto: "semana" }, store, hoy);
   assert.match(r, /Mejor día: miércoles 7 \(Q500.00\)/);
   assert.match(r, /Promedio por día con ventas: Q300.00/);
+});
+
+const dicho = (store, texto, ahora) => responder({ usuario: U, texto }, store, ahora);
+
+test("fiado: se anota como venta, se cobra por abonos y se lista", () => {
+  const store = crearStore(null);
+  assert.match(dicho(store, "le fie 100 a Marta"), /Marta te debe Q100.00 en total/);
+  assert.match(dicho(store, "le fie 50 a doña Marta López"), /Marta te debe Q150.00/); // misma persona
+  assert.match(dicho(store, "bendi 30 fiado a Pepe"), /Pepe te debe Q30.00/);
+
+  const deudas = dicho(store, "quien me debe");
+  assert.match(deudas, /Te deben Q180.00/);
+  assert.match(deudas, /Marta: Q150.00/);
+
+  assert.match(dicho(store, "Marta me pago 100"), /Marta te debe Q50.00/);
+  assert.match(dicho(store, "Marta me pago 50"), /Marta quedó al día/);
+  assert.match(dicho(store, "Marta me pago 10"), /No tengo fiado a nombre de Marta/);
+  assert.match(dicho(store, "Pepe me pago 500"), /solo debía Q30.00/);
+
+  // el fiado cuenta como venta; el cobro no es una venta nueva
+  const r = dicho(store, "resumen");
+  assert.match(r, /Ventas: Q180.00 \(3\)/);
+  assert.match(r, /Fiado: Q180.00 · Cobrado de fiados: Q180.00/);
+  assert.match(dicho(store, "fiados"), /No hay cuentas pendientes/);
+});
+
+test("crédito con proveedores: la deuda se paga sin duplicar el gasto", () => {
+  const store = crearStore(null);
+  assert.match(dicho(store, "compre 500 de pollo a Don Pepe al credito"), /Le debes Q500.00 en total a Don Pepe/);
+  assert.match(dicho(store, "debo"), /Debes Q500.00/);
+  assert.match(dicho(store, "pague 200 a Don Pepe"), /Pago registrado.*Le debes Q300.00/s);
+  assert.match(dicho(store, "pague 300 a don pepe"), /Quedaste al día con don pepe/i);
+  // sin deuda pendiente, "pagué" vuelve a ser un gasto normal
+  assert.match(dicho(store, "pague 100 a Don Pepe"), /Anotado ✅ Gasto de Q100.00/);
+  assert.match(dicho(store, "resumen"), /Gastos: Q600.00 \(2\)/);
+});
+
+test("el usuario elige la hora del resumen nocturno", async () => {
+  const store = crearStore(null);
+  assert.match(dicho(store, "resumen a las 8"), /8:00 pm/);
+  assert.equal(store.config.get(U, "hora"), 20);
+
+  responder({ usuario: U, texto: "vendi 50" }, store, new Date("2026-10-08T18:00:00Z"));
+  const enviados = [];
+  const enviar = async (...a) => enviados.push(a);
+  await enviarResumenes(store, enviar, new Date("2026-10-09T01:30:00Z")); // 7:30 pm GT: todavía no
+  assert.equal(enviados.length, 0);
+  await enviarResumenes(store, enviar, new Date("2026-10-09T02:05:00Z")); // 8:05 pm GT
+  assert.equal(enviados.length, 1);
+
+  store.config.set(U, "hora", -1);
+  assert.match(dicho(store, "no quiero resumen"), /ya no te mando/);
+  responder({ usuario: U, texto: "vendi 70" }, store, new Date("2026-10-09T18:00:00Z"));
+  await enviarResumenes(store, enviar, new Date("2026-10-10T05:00:00Z"));
+  assert.equal(enviados.length, 1); // desactivado
 });

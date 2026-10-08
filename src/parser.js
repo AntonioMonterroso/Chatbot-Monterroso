@@ -8,8 +8,13 @@ const conValor = (valor, ...palabras) => palabras.map((p) => [p, valor]);
 
 const VERBOS = new Map([
   ...conValor("venta", "vendi", "vendimos", "vendio", "vendieron", "vendo", "venta", "ingreso", "cobre", "cobramos", "cobro", "pagaron", "facture"),
+  ...conValor("fiado", "fie", "fio", "fiamos", "fiado", "fiada", "fiar"),
   ...conValor("gasto", "gaste", "gasto", "gastamos", "compre", "compra", "compro", "compramos", "pague", "pago", "pagamos", "saque"),
 ]);
+const ABONOS = tabla("abono", "abona", "abonaron", "abonar", "abonamos");
+const PAGOS_CLIENTE = tabla("pago", "paga", "pagan", "pagaron");
+const DEUDAS = tabla("fiado", "fiada", "debe", "deben", "debo", "debemos", "deuda", "deudas", "fiados", "pendientes", "cuentas");
+const CREDITO = tabla("fiado", "fiada", "credito", "fiar");
 const SUSTANTIVOS = tabla("ventas", "gastos", "compras");
 const COMANDOS = new Map([
   ...conValor("resumen", "resumen", "cierre", "reporte", "informe", "balance", "cuanto", "cuantos"),
@@ -83,9 +88,57 @@ function tokenizar(texto) {
   return out;
 }
 
+// "resumen a las 8", "mándame el cierre a las 9 pm", "no quiero resumen"
+function parsearHora(texto) {
+  const n = sinAcentos(texto.toLowerCase());
+  if (!/\d/.test(n) && /\b(no|sin|apaga\w*|desactiva\w*|quita\w*|cancela\w*)\b.*\bresumen/.test(n)) return { tipo: "hora", hora: null };
+  if (!/(resumen|avis|mand|envi|cierre|reporte)/.test(n)) return null;
+  const m = n.match(/\blas?\s+(\d{1,2})(?::\d{2})?\s*(am|pm|de la (?:manana|tarde|noche))?/);
+  if (!m || Number(m[1]) > 23) return null;
+  let h = Number(m[1]);
+  const suf = m[2];
+  const manana = suf === "am" || suf === "de la manana";
+  if (suf && !manana && h < 12) h += 12;
+  else if (!suf && h >= 1 && h <= 11) h += 12; // sin am/pm se asume noche: es un resumen de cierre
+  else if (manana && h === 12) h = 0;
+  return { tipo: "hora", hora: h };
+}
+
+// "Marta me pagó 50", "abono 50 Marta", "me abonó Marta 50"
+function detectarAbono(tokens) {
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (esNumero(t)) continue;
+    const esAbono = !!buscar(t.n, ABONOS);
+    const mePago = t.n === "me" && tokens[i + 1] && !esNumero(tokens[i + 1]) && !!buscar(tokens[i + 1].n, PAGOS_CLIENTE, false);
+    if (!esAbono && !mePago) continue;
+
+    const verbo = mePago ? [i, i + 1] : [i];
+    const numeros = tokens.filter(esNumero);
+    if (!numeros.length || !(numeros[0].valor > 0)) return { tipo: "sinmonto", venta: "abono" };
+    const ignorar = new Set(["a", "de", "del", "la", "el", "su", "cuenta", "fiado", "fiada", "hoy", "ayer", "me", "ya", "un", "una", "y", "por", "en"]);
+    const persona = tokens
+      .filter((x, j) => !esNumero(x) && !verbo.includes(j) && !ignorar.has(x.n) && !buscar(x.n, MONEDA))
+      .map((x) => x.o)
+      .join(" ");
+    if (!persona) return { tipo: "sinpersona", accion: "abono" };
+    return { tipo: "abono", direccion: "cobrar", persona, monto: redondear(numeros[0].valor) };
+  }
+  return null;
+}
+
 export function parsearMensaje(texto) {
   const tokens = tokenizar(texto);
   if (!tokens.length) return { tipo: "desconocido" };
+
+  const hora = parsearHora(texto);
+  if (hora) return hora;
+
+  const hayNumero = tokens.some(esNumero);
+  // "quién me debe", "fiados", "deudas"
+  if (!hayNumero && tokens.some((t) => buscar(t.n, DEUDAS, false))) return { tipo: "deudas" };
+  const abono = detectarAbono(tokens);
+  if (abono) return abono;
 
   const primero = tokens.findIndex((t) => !esNumero(t) && !RELLENO.has(t.n));
   const cmd = primero >= 0 ? buscar(tokens[primero].n, COMANDOS) : undefined;
@@ -105,7 +158,6 @@ export function parsearMensaje(texto) {
   if (tokens.some((t) => /^equivoque$/.test(t.n))) return { tipo: "deshacer" };
 
   // 2. Venta o gasto: el verbo puede estar en las primeras palabras
-  const hayNumero = tokens.some(esNumero);
   let tipo;
   let iVerbo = -1;
   for (let i = 0; i < Math.min(tokens.length, 5); i++) {
@@ -136,6 +188,18 @@ export function parsearMensaje(texto) {
   });
   const ayer = tokens.some((t) => !esNumero(t) && t.n === "ayer");
   const resto = () => tokens.map((t, i) => ({ ...t, i })).filter((t) => !usados.has(t.i));
+
+  // Crédito / fiado: "vendí 100 fiado a Marta", "compré 500 a Don Pepe al crédito"
+  let credito = tipo === "fiado";
+  for (const t of resto()) {
+    if (esNumero(t) || !buscar(t.n, CREDITO, false)) continue;
+    credito = true;
+    usados.add(t.i);
+    const ant = tokens[t.i - 1]?.n;
+    if (ant && /^(al|a|en|de)$/.test(ant)) usados.add(t.i - 1);
+  }
+  const fiado = credito && (tipo === "fiado" || tipo === "venta");
+  if (tipo === "fiado") tipo = "venta";
 
   // "hoy"/"ayer" dentro de una venta o gasto no son parte del detalle
   for (const t of resto()) if (!esNumero(t) && PERIODO_EXACTO.has(t.n)) usados.add(t.i);
@@ -183,13 +247,16 @@ export function parsearMensaje(texto) {
   }
   if (!(monto > 0)) return { tipo: "sinmonto", venta: tipo };
 
-  // Proveedor ("... a Don Pepe") solo en gastos
+  // Proveedor ("... a Don Pepe") en gastos, o cliente en un fiado
   let proveedor = null;
+  let persona = null;
   let restantes = resto();
-  if (tipo === "gasto") {
+  if (tipo === "gasto" || fiado) {
     const ia = restantes.map((t) => t.n).lastIndexOf("a");
     if (ia >= 0 && restantes[ia + 1] && !esNumero(restantes[ia + 1])) {
-      proveedor = restantes.slice(ia + 1).map((t) => t.o).join(" ");
+      const nombre = restantes.slice(ia + 1).map((t) => t.o).join(" ");
+      if (fiado) persona = nombre;
+      else proveedor = nombre;
       restantes = restantes.slice(0, ia);
     }
   }
@@ -202,13 +269,22 @@ export function parsearMensaje(texto) {
   }
   detalle = detalle.replace(/[.,;:!¡?¿]+$/g, "").trim();
 
-  return { tipo, monto, detalle, proveedor, metodo, ...(ayer && { ayer: true }) };
+  if (fiado) {
+    // "fiado 100 Marta": sin "a", el nombre queda en el detalle
+    if (!persona && detalle && !/\d/.test(detalle) && detalle.split(" ").length <= 3) {
+      persona = detalle;
+      detalle = "";
+    }
+    if (!persona) return { tipo: "sinpersona", accion: "fiar" };
+    return { tipo: "venta", monto, detalle, proveedor: null, metodo: "fiado", persona, ...(ayer && { ayer: true }) };
+  }
+  return { tipo, monto, detalle, proveedor, metodo, ...(credito && tipo === "gasto" && { credito: true }), ...(ayer && { ayer: true }) };
 }
 
 // "vendí 100 y gasté 50", "vendí 3 pollos a 45 y 2 cervezas a 20", varias líneas...
 // Devuelve una lista con un resultado por cada movimiento que encuentre.
 export function parsearVarios(texto) {
-  const esVerbo = (n) => !buscar(n, SUSTANTIVOS, false) && !!buscar(n, VERBOS);
+  const esVerbo = (n) => !buscar(n, SUSTANTIVOS, false) && !/^fiad[oa]$/.test(n) && !!buscar(n, VERBOS);
   const empiezaConDigito = (n) => /^[q$]?\.?\d/.test(n);
   const empiezaConNumero = (n) => empiezaConDigito(n) || !!valorPalabraNumero(n);
   const resultados = [];
@@ -246,7 +322,7 @@ export function parsearVarios(texto) {
     }
 
     for (const seg of segmentos) {
-      const t = seg.join(" ").replace(/\s+(y|e)$/i, "").trim();
+      const t = seg.join(" ").replace(/(\s+(y|e|le|les|me|se|ya))+$/i, "").trim();
       if (t) resultados.push(parsearMensaje(t));
     }
   }

@@ -1,11 +1,12 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from "node:fs";
 import { dirname } from "node:path";
 import { diaLocal } from "./tiempo.js";
+import { clavePersona } from "./texto.js";
 
 // Almacén mínimo en un archivo JSON. Se reemplazará por una base de datos real.
 // Con ruta = null vive solo en memoria (tests y chat de terminal).
 export function crearStore(ruta = "data/db.json") {
-  let datos = { movimientos: [], meta: {} };
+  let datos = { movimientos: [], meta: {}, config: {} };
   if (ruta && existsSync(ruta)) datos = { ...datos, ...JSON.parse(readFileSync(ruta, "utf8")) };
 
   let sigId = datos.movimientos.reduce((max, m) => Math.max(max, m.id ?? 0), 0);
@@ -56,6 +57,33 @@ export function crearStore(ruta = "data/db.json") {
         const d = diaLocal(new Date(m.fecha));
         return m.usuario === usuario && d >= desde && d <= hasta;
       });
+    },
+    // Cuentas pendientes: lo que le deben al negocio (fiado) y lo que el negocio debe (crédito de proveedores)
+    saldos(usuario) {
+      const cobrar = new Map();
+      const pagar = new Map();
+      const mover = (mapa, nombre, monto) => {
+        const k = clavePersona(nombre);
+        const actual = mapa.get(k) ?? { nombre, monto: 0 };
+        actual.monto = Math.round((actual.monto + monto) * 100) / 100;
+        mapa.set(k, actual);
+      };
+      for (const m of datos.movimientos) {
+        if (m.usuario !== usuario) continue;
+        if (m.tipo === "venta" && m.metodo === "fiado" && m.persona) mover(cobrar, m.persona, m.monto);
+        else if (m.tipo === "gasto" && m.credito && m.proveedor) mover(pagar, m.proveedor, m.monto);
+        else if (m.tipo === "abono" && m.direccion === "cobrar") mover(cobrar, m.persona, -m.monto);
+        else if (m.tipo === "abono" && m.direccion === "pagar") mover(pagar, m.persona, -m.monto);
+      }
+      for (const mapa of [cobrar, pagar]) for (const [k, v] of mapa) if (v.monto < 0.005) mapa.delete(k);
+      return { cobrar, pagar };
+    },
+    config: {
+      get: (usuario, k) => datos.config[usuario]?.[k],
+      set(usuario, k, v) {
+        (datos.config[usuario] ??= {})[k] = v;
+        guardar();
+      },
     },
     usuarios() {
       return [...new Set(datos.movimientos.map((m) => m.usuario))];

@@ -113,3 +113,21 @@ test("corregir y últimos", () => {
   assert.equal(p("ultimos").tipo, "ultimos");
   assert.equal(p("mis movimientos").tipo, "ultimos");
 });
+
+test("fiado, abonos, deudas y hora del resumen", () => {
+  assert.deepEqual(p("le fie 100 a Marta"), { tipo: "venta", monto: 100, detalle: "", proveedor: null, metodo: "fiado", persona: "Marta" });
+  assert.equal(p("fiado 100 Marta").persona, "Marta");
+  assert.equal(p("vendi 100 a Marta fiado").persona, "Marta");
+  assert.equal(p("le fie 100").tipo, "sinpersona");
+  assert.deepEqual(p("Marta me pago 50"), { tipo: "abono", direccion: "cobrar", persona: "Marta", monto: 50 });
+  assert.equal(p("abono 50 Marta").persona, "Marta");
+  assert.equal(p("Marta me pago").tipo, "sinmonto");
+  assert.equal(p("compre 500 a Don Pepe al credito").credito, true);
+  assert.equal(p("compre 500 a Don Pepe al credito").proveedor, "Don Pepe");
+  for (const t of ["quien me debe", "fiados", "deudas", "cuanto me deben"]) assert.equal(p(t).tipo, "deudas", t);
+  assert.equal(p("resumen a las 8").hora, 20);
+  assert.equal(p("mandame el cierre a las 9 pm").hora, 21);
+  assert.equal(p("avisame a las 7 de la mañana").hora, 7);
+  assert.equal(p("no quiero resumen").hora, null);
+  assert.equal(parsearVarios("le fie 100 a Marta y le fie 50 a Pepe").length, 2);
+});

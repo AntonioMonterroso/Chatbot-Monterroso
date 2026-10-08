@@ -14,7 +14,18 @@ function agrupar(movs, clave) {
 }
 
 export function describir(m) {
-  const extra = [m.detalle, m.proveedor && `a ${m.proveedor}`, m.metodo].filter(Boolean).join(", ");
+  if (m.tipo === "abono") {
+    return m.direccion === "pagar" ? `Pago a ${m.persona} de ${q(m.monto)}` : `Abono de ${m.persona} de ${q(m.monto)}`;
+  }
+  const extra = [
+    m.detalle,
+    m.proveedor && `a ${m.proveedor}`,
+    m.persona && `fiado a ${m.persona}`,
+    m.metodo && m.metodo !== "fiado" && m.metodo,
+    m.credito && "a crédito",
+  ]
+    .filter(Boolean)
+    .join(", ");
   return `${m.tipo === "venta" ? "Venta" : "Gasto"} de ${q(m.monto)}${extra ? ` (${extra})` : ""}`;
 }
 
@@ -37,6 +48,12 @@ export function armarResumen(movs, titulo = "Resumen de hoy", { previos = [], et
     `Ganancia: ${q(suma(ventas) - suma(gastos))}`,
   ];
 
+  const fiado = suma(ventas.filter((m) => m.metodo === "fiado"));
+  const cobrado = suma(movs.filter((m) => m.tipo === "abono" && m.direccion === "cobrar"));
+  if (fiado || cobrado) {
+    lineas.push([fiado && `Fiado: ${q(fiado)}`, cobrado && `Cobrado de fiados: ${q(cobrado)}`].filter(Boolean).join(" · "));
+  }
+
   const cmp = etiquetaPrevio && comparar(suma(ventas), suma(ventasDe(previos)), etiquetaPrevio);
   if (cmp) lineas.push(cmp);
 
@@ -50,7 +67,7 @@ export function armarResumen(movs, titulo = "Resumen de hoy", { previos = [], et
   const topGastos = agrupar(gastos, (m) => m.proveedor || m.detalle || "otros").slice(0, 3);
   if (topGastos.length) lineas.push("", "Mayores gastos:", ...topGastos.map(([k, v]) => `- ${k}: ${q(v)}`));
 
-  const porMetodo = agrupar(ventas.filter((m) => m.metodo), (m) => m.metodo);
+  const porMetodo = agrupar(ventas.filter((m) => m.metodo && m.metodo !== "fiado"), (m) => m.metodo);
   if (porMetodo.length) lineas.push("", `Ventas por método: ${porMetodo.map(([k, v]) => `${k} ${q(v)}`).join(", ")}`);
 
   if (suma(gastos) > suma(ventas)) lineas.push("", "⚠️ Se gastó más de lo que se vendió.");
@@ -75,4 +92,17 @@ export function armarUltimos(movs, ahora = new Date()) {
     }),
     'Para borrar el último escribe "deshacer"; para cambiar su monto, "corrige 120".',
   ].join("\n");
+}
+
+export function armarDeudas({ cobrar, pagar }) {
+  const lista = (mapa) => [...mapa.values()].sort((a, b) => b.monto - a.monto);
+  const total = (mapa) => lista(mapa).reduce((a, x) => a + x.monto, 0);
+  if (!cobrar.size && !pagar.size) return "No hay cuentas pendientes. 🎉";
+  const lineas = [];
+  if (cobrar.size) lineas.push(`Te deben ${q(total(cobrar))}:`, ...lista(cobrar).map((x) => `- ${x.nombre}: ${q(x.monto)}`));
+  if (pagar.size) {
+    if (lineas.length) lineas.push("");
+    lineas.push(`Debes ${q(total(pagar))}:`, ...lista(pagar).map((x) => `- ${x.nombre}: ${q(x.monto)}`));
+  }
+  return lineas.join("\n");
 }

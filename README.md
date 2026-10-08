@@ -6,9 +6,10 @@ Estado: en construcción (versión mínima).
 
 ## Qué hace
 
-- **Texto**: `vendí 250` · `vendí 3 pollos a 45` · `vendí 500 con tarjeta` · `gasté 100 en pollo` · `compré 80 tomates a Don Pepe` · `pagué 500 a Don Pepe`
+- **Texto** (tolera faltas de ortografía, mayúsculas y jerga: `bendi 250`, `gaste cien en cebolla`, `vendi 2k`, `ayer vendi 500`): `vendí 250` · `vendí 3 pollos a 45` · `vendí 500 con tarjeta` · `gasté 100 en pollo` · `compré 80 tomates a Don Pepe` · `pagué 500 a Don Pepe`
 - **Reportes**: `resumen` · `ayer` · `semana` · `mes` · `proveedores`
 - **Errores**: `deshacer` borra lo último que anotó ese usuario
+- **Respaldo de IA**: si el bot no entiende un mensaje, se lo pregunta a Claude (necesita `ANTHROPIC_API_KEY`); la respuesta se valida antes de anotar nada
 - **Nota de voz**: se transcribe con Whisper y se trata como texto (necesita `OPENAI_API_KEY`)
 - **Foto de factura**: Claude lee total, comercio y detalle y anota el gasto (necesita `ANTHROPIC_API_KEY`)
 - **Resumen nocturno**: cada día a la hora `RESUMEN_HORA` (hora de Guatemala) a quien tuvo movimientos

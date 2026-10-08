@@ -35,3 +35,55 @@ test("casos incompletos o desconocidos", () => {
   assert.equal(p("vendí").tipo, "sinmonto");
   assert.equal(p("qué tal el clima").tipo, "desconocido");
 });
+
+test("tolera faltas de ortografía y escritura informal", () => {
+  const casos = [
+    ["bendi 250", { tipo: "venta", monto: 250 }],
+    ["vendiii 250", { tipo: "venta", monto: 250 }],
+    ["Vendí 500 con targeta", { tipo: "venta", monto: 500, metodo: "tarjeta" }],
+    ["gaste en pollo 100", { tipo: "gasto", monto: 100, detalle: "pollo" }],
+    ["compre tomates a Don Pepe 80", { tipo: "gasto", monto: 80, detalle: "tomates", proveedor: "Don Pepe" }],
+    ["pageé 500 a Don Pepe en efectibo", { tipo: "gasto", monto: 500, proveedor: "Don Pepe", metodo: "efectivo" }],
+    ["hoy vendi 300", { tipo: "venta", monto: 300, detalle: "" }],
+    ["ya vendi 2k", { tipo: "venta", monto: 2000 }],
+    ["vendí 2 mil", { tipo: "venta", monto: 2000 }],
+    ["Q 75 vendi", { tipo: "venta", monto: 75 }],
+    ["vendi 3 pollos x 45", { tipo: "venta", monto: 135 }],
+    ["rresumen", { tipo: "resumen", periodo: "hoy" }],
+    ["resumen de la semna", { tipo: "resumen", periodo: "semana" }],
+    ["cuanto vendi hoy", { tipo: "resumen", periodo: "hoy" }],
+    ["ventas de hoy", { tipo: "resumen", periodo: "hoy" }],
+    ["ayer", { tipo: "resumen", periodo: "ayer" }],
+    ["deshaser", { tipo: "deshacer" }],
+    ["me equivoque", { tipo: "deshacer" }],
+    ["proveedoress", { tipo: "proveedores" }],
+    ["ola", { tipo: "ayuda" }],
+  ];
+  for (const [texto, esperado] of casos) {
+    const r = p(texto);
+    for (const [k, v] of Object.entries(esperado)) assert.equal(r[k], v, `"${texto}" -> ${k}: ${JSON.stringify(r)}`);
+  }
+});
+
+test("números escritos con letras", () => {
+  assert.equal(p("vendi doscientos cincuenta").monto, 250);
+  assert.equal(p("vendí dos mil quinientos").monto, 2500);
+  assert.equal(p("gaste treinta y cinco en hielo").monto, 35);
+  assert.equal(p("vendi sincuenta").monto, 50);
+  // una cantidad chica en letras no es el monto
+  assert.equal(p("vendi dos pollos").tipo, "sinmonto");
+  assert.equal(p("vendi dos pollos a 45").monto, 90);
+});
+
+test("no confunde palabras comunes con comandos", () => {
+  for (const t of ["todo bien", "qué buen día", "gracias", "el tren llegó"]) {
+    assert.equal(p(t).tipo, "desconocido", t);
+  }
+});
+
+test("preámbulo y fecha", () => {
+  const g = p("anota gasto de 60 en cebolla");
+  assert.equal(g.detalle, "cebolla");
+  assert.equal(p("ayer vendi 500").ayer, true);
+  assert.equal(p("vendi 500").ayer, undefined);
+});

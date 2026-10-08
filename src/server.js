@@ -2,15 +2,18 @@ import { createServer } from "node:http";
 import { crearStore } from "./store.js";
 import { procesar } from "./bot.js";
 import { extraerMensajes, firmaValida, enviarTexto, descargarMedia } from "./whatsapp.js";
-import { transcribirAudio, leerRecibo } from "./ia.js";
+import { transcribirAudio, leerRecibo, interpretarMensaje } from "./ia.js";
 import { iniciarResumenNocturno } from "./scheduler.js";
 
-// Voz y foto solo se activan si hay llave configurada.
+// Voz, foto y el respaldo de IA solo se activan si hay llave configurada.
 function depsDesdeEnv(env) {
   const deps = {};
   if (env.WHATSAPP_ACCESS_TOKEN) deps.descargarMedia = (id) => descargarMedia(id, env);
   if (env.OPENAI_API_KEY) deps.transcribirAudio = (m) => transcribirAudio(m, env);
-  if (env.ANTHROPIC_API_KEY) deps.leerRecibo = (m) => leerRecibo(m, env);
+  if (env.ANTHROPIC_API_KEY) {
+    deps.leerRecibo = (m) => leerRecibo(m, env);
+    deps.interpretar = (t) => interpretarMensaje(t, env);
+  }
   return deps;
 }
 

@@ -1,4 +1,4 @@
-import { parsearMensaje } from "./parser.js";
+import { parsearMensaje, validarInterpretacion } from "./parser.js";
 import { armarResumen, armarProveedores, q } from "./summary.js";
 import { rango } from "./tiempo.js";
 
@@ -18,12 +18,17 @@ function describir(m) {
 
 // Responde a un mensaje de texto. `ahora` se inyecta para poder probar fechas.
 export function responder({ usuario, texto }, store, ahora = new Date()) {
-  const p = parsearMensaje(texto);
+  return ejecutar(parsearMensaje(texto), usuario, store, ahora);
+}
+
+function ejecutar(p, usuario, store, ahora) {
   switch (p.tipo) {
     case "venta":
     case "gasto": {
-      const { tipo, ...resto } = p;
-      const mov = store.agregar({ usuario, tipo, ...resto, fecha: ahora.toISOString() });
+      const { tipo, ayer, ...resto } = p;
+      // "ayer vendí 500" se anota con la fecha de ayer
+      const fecha = new Date(ahora.getTime() - (ayer ? 86_400_000 : 0));
+      const mov = store.agregar({ usuario, tipo, ...resto, fecha: fecha.toISOString() });
       return `Anotado ✅ ${describir(mov)}.\nSi te equivocaste, escribe "deshacer".`;
     }
     case "deshacer": {
@@ -47,10 +52,23 @@ export function responder({ usuario, texto }, store, ahora = new Date()) {
   }
 }
 
+// Si el parser local no entiende, le pregunta a la IA (si está configurada).
+async function responderConRespaldo({ usuario, texto }, store, deps, ahora) {
+  let p = parsearMensaje(texto);
+  if (p.tipo === "desconocido" && deps.interpretar) {
+    try {
+      p = validarInterpretacion(await deps.interpretar(texto)) ?? p;
+    } catch (e) {
+      console.error("Respaldo de IA falló:", e.message);
+    }
+  }
+  return ejecutar(p, usuario, store, ahora);
+}
+
 // Punto de entrada para cualquier tipo de mensaje de WhatsApp.
-// deps: { descargarMedia, transcribirAudio, leerRecibo } (opcionales)
+// deps: { descargarMedia, transcribirAudio, leerRecibo, interpretar } (opcionales)
 export async function procesar(msg, store, deps = {}, ahora = new Date()) {
-  if (msg.tipo === "text") return responder(msg, store, ahora);
+  if (msg.tipo === "text") return responderConRespaldo(msg, store, deps, ahora);
 
   if (msg.tipo === "audio") {
     if (!deps.descargarMedia || !deps.transcribirAudio) {
@@ -59,7 +77,7 @@ export async function procesar(msg, store, deps = {}, ahora = new Date()) {
     const media = await deps.descargarMedia(msg.mediaId);
     const texto = (await deps.transcribirAudio(media)).trim();
     if (!texto) return "No alcancé a entender el audio. ¿Me lo repites o me lo escribes?";
-    return `🎤 Entendí: "${texto}"\n\n${responder({ usuario: msg.usuario, texto }, store, ahora)}`;
+    return `🎤 Entendí: "${texto}"\n\n${await responderConRespaldo({ usuario: msg.usuario, texto }, store, deps, ahora)}`;
   }
 
   if (msg.tipo === "image") {

@@ -89,3 +89,44 @@ test("resumen nocturno: una vez al día y solo a quien tuvo movimientos", async 
   assert.equal(enviados[0][0], U);
   assert.equal(store.meta.get("ultimoResumen"), "2026-10-08");
 });
+
+import { validarInterpretacion } from "../src/parser.js";
+
+test("respaldo de IA: se usa solo cuando el parser no entiende, y se valida", async () => {
+  const store = crearStore(null);
+  const llamadas = [];
+  const deps = {
+    interpretar: async (t) => {
+      llamadas.push(t);
+      return { tipo: "venta", monto: 120, detalle: "almuerzos", metodo: "efectivo" };
+    },
+  };
+  const r = await procesar({ usuario: U, tipo: "text", texto: "entraron 120 por unos almuerzos" }, store, deps);
+  assert.match(r, /Venta de Q120.00/);
+  assert.equal(llamadas.length, 1);
+
+  await procesar({ usuario: U, tipo: "text", texto: "vendi 50" }, store, deps); // el parser local basta
+  assert.equal(llamadas.length, 1);
+
+  // si la IA falla o devuelve basura, el bot responde normal
+  const mala = { interpretar: async () => ({ tipo: "venta", monto: "mucho" }) };
+  assert.match(await procesar({ usuario: U, tipo: "text", texto: "xyz raro" }, store, mala), /ayuda|cuánto/);
+  const rota = { interpretar: async () => { throw new Error("sin red"); } };
+  assert.match(await procesar({ usuario: U, tipo: "text", texto: "xyz raro" }, store, rota), /No te entendí/);
+});
+
+test("validarInterpretacion rechaza datos raros", () => {
+  assert.equal(validarInterpretacion(null), null);
+  assert.equal(validarInterpretacion({ tipo: "borrar todo" }), null);
+  assert.equal(validarInterpretacion({ tipo: "venta", monto: -5 }).tipo, "sinmonto");
+  assert.equal(validarInterpretacion({ tipo: "venta", monto: 1e12 }).tipo, "sinmonto");
+  assert.equal(validarInterpretacion({ tipo: "venta", monto: 10, metodo: "bitcoin" }).metodo, null);
+});
+
+test("'ayer vendí 500' se anota con la fecha de ayer", () => {
+  const store = crearStore(null);
+  const hoy = new Date("2026-10-08T18:00:00Z");
+  responder({ usuario: U, texto: "ayer vendi 500" }, store, hoy);
+  assert.match(responder({ usuario: U, texto: "ayer" }, store, hoy), /Ventas: Q500.00/);
+  assert.match(responder({ usuario: U, texto: "resumen" }, store, hoy), /Sin movimientos/);
+});

@@ -1,87 +1,218 @@
-// Interpreta mensajes de texto en español, de forma flexible.
-// "vendí 250", "vendí 3 pollos a 45 con tarjeta", "gasté Q100 en pollo",
-// "compré 80 tomates a Don Pepe", "pagué 500 a Don Pepe", "resumen de la semana"
+// Interpreta mensajes en español, tolerando faltas de ortografía y escritura informal:
+//   "bendi 3 pollos a 45", "gaste en pollo 100", "compre tomates a Don Pepe 80",
+//   "vendí doscientos cincuenta", "rresumen de la semana", "me equivoque"
+import { sinAcentos, buscar, valorPalabraNumero, numeroDePalabras } from "./texto.js";
 
-const sinAcentos = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "");
-const num = (s) => Number(s.replace(",", "."));
+const tabla = (...palabras) => new Map(palabras.map((p) => [p, true]));
+const conValor = (valor, ...palabras) => palabras.map((p) => [p, valor]);
+
+const VERBOS = new Map([
+  ...conValor("venta", "vendi", "vendimos", "vendio", "vendieron", "vendo", "venta", "ingreso", "cobre", "cobramos", "cobro", "pagaron", "facture"),
+  ...conValor("gasto", "gaste", "gasto", "gastamos", "compre", "compra", "compro", "compramos", "pague", "pago", "pagamos", "saque"),
+]);
+const SUSTANTIVOS = tabla("ventas", "gastos", "compras");
+const COMANDOS = new Map([
+  ...conValor("resumen", "resumen", "cierre", "reporte", "informe", "balance", "cuanto", "cuantos"),
+  ...conValor("proveedores", "proveedores", "proveedor"),
+  ...conValor("deshacer", "deshacer", "borrar", "borra", "anular", "anula", "cancelar", "cancela", "elimina", "eliminar", "equivoque"),
+]);
+const AYUDA = tabla("ayuda", "ayudame", "menu", "help", "hola", "buenas", "buenos", "comandos", "instrucciones");
+const PERIODOS = new Map([...conValor("ayer", "ayer"), ...conValor("semana", "semana", "semanal"), ...conValor("mes", "mes", "mensual"), ...conValor("hoy", "hoy")]);
+const METODOS = new Map([
+  ...conValor("efectivo", "efectivo", "cash"),
+  ...conValor("tarjeta", "tarjeta", "pos"),
+  ...conValor("transferencia", "transferencia", "deposito"),
+]);
+const RELLENO = tabla("ya", "me", "se", "acabo", "acabamos", "oye", "hey", "pues", "porfa", "favor", "por", "apunta", "anota", "registra", "anotame", "apuntame", "registrame", "quiero", "necesito", "de", "un", "una", "el", "la", "los", "las", "mi", "mis", "hice", "fue", "fueron", "y");
+const PERIODO_EXACTO = tabla("hoy", "ayer");
+const MONEDA = tabla("q", "qtz", "quetzal", "quetzales");
+const PREPOSICIONES_INICIO = /^(en|de|por|para|con|a|la|el|los|las|un|una|mi|mis)$/;
+
 const redondear = (n) => Math.round(n * 100) / 100;
+const esNumero = (t) => t.valor !== undefined;
 
-const METODOS = [
-  ["efectivo", /\b(en )?efectivo\b/],
-  ["tarjeta", /\b(con |en )?tarjeta\b/],
-  ["transferencia", /\b(por |con |en )?(transferencia|deposito)\b/],
-];
-
-// Quita el tramo que calza `re` de `orig` y `norm` (mismo largo) a la vez.
-function quitar([orig, norm], re) {
-  const m = norm.match(re);
-  if (!m) return [orig, norm];
-  const fin = m.index + m[0].length;
-  return [orig.slice(0, m.index) + orig.slice(fin), norm.slice(0, m.index) + norm.slice(fin)];
+function normalizarToken(o) {
+  return sinAcentos(o.toLowerCase())
+    .replace(/[^a-z0-9.,/$]/g, "")
+    .replace(/^[.,/]+|[.,/]+$/g, "")
+    .replace(/([a-z])\1{2,}/g, "$1"); // "vendiii" -> "vendi" (los dígitos no)
 }
 
-const limpiar = (s) =>
-  s
-    .replace(/\s+/g, " ")
-    .trim()
-    .replace(/^(en|de|por|para|a)\s+/i, "")
-    .replace(/\s*(quetzales|en total)\s*$/i, "")
-    .trim();
+// Texto -> tokens {o: original, n: normalizado, valor?: número}
+function tokenizar(texto) {
+  // "1,500" -> "1500"
+  const limpio = texto.trim().replace(/(\d),(\d{3})(?!\d)/g, "$1$2");
+  const tokens = limpio
+    .split(/\s+/)
+    .map((o) => ({ o, n: normalizarToken(o) }))
+    .filter((t) => t.n);
+
+  const out = [];
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    // "250", "q250", "250q", "$250", "80.50", "2k"
+    const m = t.n.match(/^[q$]?\.?(\d+(?:[.,]\d{1,2})?)(k|q)?$/);
+    if (m) {
+      let valor = Number(m[1].replace(",", "."));
+      if (m[2] === "k") valor *= 1000;
+      if (tokens[i + 1]?.n === "mil") {
+        valor *= 1000;
+        i++;
+      }
+      out.push({ ...t, valor });
+      continue;
+    }
+    // "dos mil quinientos", "treinta y cinco"
+    if (valorPalabraNumero(t.n)) {
+      const palabras = [t.n];
+      let j = i + 1;
+      while (j < tokens.length) {
+        const sig = tokens[j].n;
+        if (valorPalabraNumero(sig)) palabras.push(sig);
+        else if (!(sig === "y" && tokens[j + 1] && valorPalabraNumero(tokens[j + 1].n))) break; // "treinta y cinco": la "y" no suma
+        j++;
+      }
+      out.push({ o: tokens.slice(i, j).map((x) => x.o).join(" "), n: t.n, valor: numeroDePalabras(palabras), palabra: true });
+      i = j - 1;
+      continue;
+    }
+    out.push(t);
+  }
+  return out;
+}
 
 export function parsearMensaje(texto) {
-  // "1,500" -> "1500" (misma conversión en ambas versiones del texto)
-  const orig = texto.trim().replace(/(\d),(\d{3})(?!\d)/g, "$1$2");
-  const n = sinAcentos(orig).toLowerCase();
+  const tokens = tokenizar(texto);
+  if (!tokens.length) return { tipo: "desconocido" };
 
-  if (/^(ayuda|menu|help|hola|buenas|buenos dias)\b/.test(n)) return { tipo: "ayuda" };
-  if (/^(deshacer|borra(r)? (el )?ultimo|cancela(r)? (el )?ultimo|me equivoque)/.test(n)) return { tipo: "deshacer" };
-  if (/^proveedor(es)?\b/.test(n)) return { tipo: "proveedores" };
+  const primero = tokens.findIndex((t) => !esNumero(t) && !RELLENO.has(t.n));
+  const cmd = primero >= 0 ? buscar(tokens[primero].n, COMANDOS) : undefined;
+  const periodo = tokens.map((t) => buscar(t.n, PERIODOS)).find(Boolean) ?? "hoy";
 
-  if (/^(resumen|cierre|reporte|hoy|ayer|semana|mes|cuanto)\b/.test(n)) {
-    const periodo = /\bayer\b/.test(n) ? "ayer" : /\bsemana\b/.test(n) ? "semana" : /\bmes\b/.test(n) ? "mes" : "hoy";
-    return { tipo: "resumen", periodo };
-  }
+  // 1. Comandos claros: resumen, proveedores, deshacer
+  if (cmd === "resumen") return { tipo: "resumen", periodo };
+  if (cmd === "proveedores") return { tipo: "proveedores" };
+  if (cmd === "deshacer") return { tipo: "deshacer" };
+  if (tokens.some((t) => /^equivoque$/.test(t.n))) return { tipo: "deshacer" };
 
-  const verbo = n.match(/^(vendi|venta|ventas|ingreso|cobre|gaste|gasto|compre|compra|pague|pago)\b/);
-  if (!verbo) return { tipo: "desconocido" };
-  const tipo = /^(vendi|venta|ventas|ingreso|cobre)$/.test(verbo[1]) ? "venta" : "gasto";
-
-  let par = [orig.slice(verbo[0].length), n.slice(verbo[0].length)];
-
-  let metodo = null;
-  for (const [nombre, re] of METODOS) {
-    if (re.test(par[1])) {
-      metodo = nombre;
-      par = quitar(par, re);
+  // 2. Venta o gasto: el verbo puede estar en las primeras palabras
+  const hayNumero = tokens.some(esNumero);
+  let tipo;
+  let iVerbo = -1;
+  for (let i = 0; i < Math.min(tokens.length, 5); i++) {
+    if (esNumero(tokens[i])) continue;
+    // "ventas"/"gastos" sin ningún número es un sustantivo ("ventas de hoy"), no un verbo
+    if (!hayNumero && buscar(tokens[i].n, SUSTANTIVOS, false)) continue;
+    const v = buscar(tokens[i].n, VERBOS);
+    if (v) {
+      tipo = v;
+      iVerbo = i;
+      break;
     }
   }
 
-  let monto;
-  let detalle;
-  let proveedor = null;
+  // "ventas de hoy", "gastos de la semana": sin monto, es un pedido de resumen
+  if (!tipo || iVerbo < 0) {
+    if (tokens.length <= 4 && tokens.some((t) => buscar(t.n, SUSTANTIVOS))) return { tipo: "resumen", periodo };
+    const p = primero >= 0 ? buscar(tokens[primero].n, PERIODOS) : undefined;
+    if (p) return { tipo: "resumen", periodo: p };
+    if (primero >= 0 && buscar(tokens[primero].n, AYUDA)) return { tipo: "ayuda" };
+    return { tipo: "desconocido" };
+  }
 
-  // "3 pollos a 45" -> cantidad × precio unitario
-  const qp = par[1].match(/(\d+)\s+([a-z ]+?)\s+a\s+q?\s*(\d+(?:[.,]\d{1,2})?)\b/);
-  if (qp) {
-    monto = redondear(Number(qp[1]) * num(qp[3]));
-    detalle = `${qp[1]} ${limpiar(par[0].slice(qp.index + qp[1].length, qp.index + qp[1].length + qp[2].length + 1))}`.trim();
-    par = quitar(par, /(\d+)\s+([a-z ]+?)\s+a\s+q?\s*(\d+(?:[.,]\d{1,2})?)\b/);
-  } else {
-    const m = par[1].match(/(?:q\.?\s*)?(\d+(?:[.,]\d{1,2})?)/);
-    if (!m) return { tipo: "sinmonto", venta: tipo };
-    monto = num(m[1]);
-    par = quitar(par, /(?:q\.?\s*)?(\d+(?:[.,]\d{1,2})?)/);
-    detalle = par[0].replace(/\s+/g, " ").trim();
-    if (tipo === "gasto") {
-      const prov = detalle.match(/(?:^|\s)a\s+(.+)$/i);
-      if (prov) {
-        proveedor = prov[1].trim();
-        detalle = detalle.slice(0, prov.index);
+  const usados = new Set([iVerbo]);
+  // Lo que va antes del verbo es preámbulo ("anota", "ya", "hoy"): no es parte del detalle
+  tokens.forEach((t, i) => {
+    if (i < iVerbo && !esNumero(t)) usados.add(i);
+  });
+  const ayer = tokens.some((t) => !esNumero(t) && t.n === "ayer");
+  const resto = () => tokens.map((t, i) => ({ ...t, i })).filter((t) => !usados.has(t.i));
+
+  // "hoy"/"ayer" dentro de una venta o gasto no son parte del detalle
+  for (const t of resto()) if (!esNumero(t) && PERIODO_EXACTO.has(t.n)) usados.add(t.i);
+
+  // Método de pago
+  let metodo = null;
+  for (const t of resto()) {
+    const m = !esNumero(t) && buscar(t.n, METODOS);
+    if (m) {
+      metodo = m;
+      usados.add(t.i);
+      const ant = tokens[t.i - 1]?.n;
+      if (ant && /^(con|en|por|de)$/.test(ant)) usados.add(t.i - 1);
+    }
+  }
+  // Moneda ("Q", "quetzales")
+  for (const t of resto()) if (!esNumero(t) && buscar(t.n, MONEDA)) usados.add(t.i);
+
+  // Monto: "3 pollos a 45" (cantidad × precio) o un solo número
+  let monto;
+  let detalleQP;
+  const libres = resto();
+  for (let a = 0; a < libres.length && monto === undefined; a++) {
+    if (!esNumero(libres[a])) continue;
+    for (let b = a + 1; b < libres.length && b <= a + 6; b++) {
+      if (esNumero(libres[b])) break;
+      const sig = libres[b + 1];
+      if (/^(a|x)$/.test(libres[b].n) && sig && esNumero(sig) && b > a + 1) {
+        monto = redondear(libres[a].valor * sig.valor);
+        detalleQP = libres.slice(a, b).map((t) => (esNumero(t) ? String(t.valor) : t.o)).join(" ");
+        for (const t of libres.slice(a, b + 2)) usados.add(t.i);
+        break;
       }
     }
-    detalle = limpiar(detalle);
+  }
+  if (monto === undefined) {
+    // Prefiere números en dígitos; un número en letras chico ("dos pollos") se toma como cantidad, no como monto.
+    const candidatos = resto().filter(esNumero);
+    const elegido =
+      candidatos.find((t) => !t.palabra) ?? candidatos.find((t) => t.palabra && t.valor >= 20);
+    if (elegido) {
+      monto = elegido.valor;
+      usados.add(elegido.i);
+    }
+  }
+  if (!(monto > 0)) return { tipo: "sinmonto", venta: tipo };
+
+  // Proveedor ("... a Don Pepe") solo en gastos
+  let proveedor = null;
+  let restantes = resto();
+  if (tipo === "gasto") {
+    const ia = restantes.map((t) => t.n).lastIndexOf("a");
+    if (ia >= 0 && restantes[ia + 1] && !esNumero(restantes[ia + 1])) {
+      proveedor = restantes.slice(ia + 1).map((t) => t.o).join(" ");
+      restantes = restantes.slice(0, ia);
+    }
   }
 
-  if (!(monto > 0)) return { tipo: "sinmonto", venta: tipo };
-  return { tipo, monto, detalle, proveedor, metodo };
+  let detalle = detalleQP;
+  if (detalle === undefined) {
+    const palabras = restantes.filter((t) => !/^(c\/u|cu|cada|unidad)$/.test(t.n)).map((t) => t.o);
+    while (palabras.length && PREPOSICIONES_INICIO.test(normalizarToken(palabras[0]))) palabras.shift();
+    detalle = palabras.join(" ");
+  }
+  detalle = detalle.replace(/[.,;:!¡?¿]+$/g, "").trim();
+
+  return { tipo, monto, detalle, proveedor, metodo, ...(ayer && { ayer: true }) };
+}
+
+// Valida lo que devuelve la IA antes de usarlo (nunca confiar en el JSON a ciegas).
+export function validarInterpretacion(obj) {
+  if (!obj || typeof obj !== "object") return null;
+  const texto = (v) => (typeof v === "string" ? v.slice(0, 80).trim() : "");
+  const tipo = obj.tipo;
+  if (tipo === "venta" || tipo === "gasto") {
+    const monto = Number(obj.monto);
+    if (!(monto > 0 && monto < 10_000_000)) return { tipo: "sinmonto", venta: tipo };
+    return {
+      tipo,
+      monto: redondear(monto),
+      detalle: texto(obj.detalle),
+      proveedor: tipo === "gasto" ? texto(obj.proveedor) || null : null,
+      metodo: ["efectivo", "tarjeta", "transferencia"].includes(obj.metodo) ? obj.metodo : null,
+    };
+  }
+  if (tipo === "resumen") return { tipo, periodo: ["hoy", "ayer", "semana", "mes"].includes(obj.periodo) ? obj.periodo : "hoy" };
+  if (["proveedores", "deshacer", "ayuda"].includes(tipo)) return { tipo };
+  return null;
 }

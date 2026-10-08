@@ -131,3 +131,25 @@ test("fiado, abonos, deudas y hora del resumen", () => {
   assert.equal(p("no quiero resumen").hora, null);
   assert.equal(parsearVarios("le fie 100 a Marta y le fie 50 a Pepe").length, 2);
 });
+
+import { categoriaDe } from "../src/categorias.js";
+
+test("categorías de gasto, con faltas de ortografía", () => {
+  assert.equal(categoriaDe("3 libras de tomate"), "verduras y frutas");
+  assert.equal(categoriaDe("pollos"), "carnes");
+  assert.equal(categoriaDe("sebolla"), "verduras y frutas");
+  assert.equal(categoriaDe("servilletas"), "empaques");
+  assert.equal(categoriaDe("cosas raras"), "otros");
+  assert.equal(categoriaDe(""), "otros");
+});
+
+test("equipo y meta en el parser", () => {
+  assert.deepEqual(p("agrega a 5025555 1234"), { tipo: "agregarEmpleado", telefono: "50255551234" });
+  assert.deepEqual(p("agrega empleado 55551234"), { tipo: "agregarEmpleado", telefono: "50255551234" });
+  assert.equal(p("quita el empleado 55551234").tipo, "quitarEmpleado");
+  assert.equal(p("equipo").tipo, "equipo");
+  assert.deepEqual(p("meta 1000"), { tipo: "meta", monto: 1000 });
+  assert.deepEqual(p("mi meta es de mil"), { tipo: "meta", monto: 1000 });
+  assert.deepEqual(p("sin meta"), { tipo: "meta", monto: null });
+  assert.equal(p("vendi 12345678 pesos").tipo, "venta"); // un monto grande no es un teléfono
+});

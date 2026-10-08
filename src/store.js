@@ -6,7 +6,7 @@ import { clavePersona } from "./texto.js";
 // Almacén mínimo en un archivo JSON. Se reemplazará por una base de datos real.
 // Con ruta = null vive solo en memoria (tests y chat de terminal).
 export function crearStore(ruta = "data/db.json") {
-  let datos = { movimientos: [], meta: {}, config: {} };
+  let datos = { movimientos: [], meta: {}, config: {}, equipo: {} };
   if (ruta && existsSync(ruta)) datos = { ...datos, ...JSON.parse(readFileSync(ruta, "utf8")) };
 
   let sigId = datos.movimientos.reduce((max, m) => Math.max(max, m.id ?? 0), 0);
@@ -26,9 +26,10 @@ export function crearStore(ruta = "data/db.json") {
       guardar();
       return registro;
     },
-    deshacerUltimo(usuario) {
+    // `por`: quién lo anotó (un empleado solo deshace/corrige lo suyo)
+    deshacerUltimo(usuario, por = usuario) {
       for (let i = datos.movimientos.length - 1; i >= 0; i--) {
-        if (datos.movimientos[i].usuario === usuario) {
+        if (datos.movimientos[i].usuario === usuario && (datos.movimientos[i].registro ?? usuario) === por) {
           const [quitado] = datos.movimientos.splice(i, 1);
           guardar();
           return quitado;
@@ -36,13 +37,17 @@ export function crearStore(ruta = "data/db.json") {
       }
       return null;
     },
-    ultimos(usuario, n = 5) {
-      return datos.movimientos.filter((m) => m.usuario === usuario).slice(-n).reverse();
+    // por = undefined: todo el negocio; con `por`, solo lo que anotó esa persona
+    ultimos(usuario, n = 5, por) {
+      return datos.movimientos
+        .filter((m) => m.usuario === usuario && (!por || (m.registro ?? usuario) === por))
+        .slice(-n)
+        .reverse();
     },
-    corregirUltimo(usuario, monto) {
+    corregirUltimo(usuario, monto, por = usuario) {
       for (let i = datos.movimientos.length - 1; i >= 0; i--) {
         const m = datos.movimientos[i];
-        if (m.usuario === usuario) {
+        if (m.usuario === usuario && (m.registro ?? usuario) === por) {
           const antes = m.monto;
           m.monto = monto;
           guardar();
@@ -77,6 +82,24 @@ export function crearStore(ruta = "data/db.json") {
       }
       for (const mapa of [cobrar, pagar]) for (const [k, v] of mapa) if (v.monto < 0.005) mapa.delete(k);
       return { cobrar, pagar };
+    },
+    // Equipo: un empleado anota en el negocio de su dueño
+    negocioDe: (telefono) => datos.equipo[telefono] ?? telefono,
+    empleados: (dueno) => Object.keys(datos.equipo).filter((t) => datos.equipo[t] === dueno),
+    agregarEmpleado(dueno, telefono) {
+      if (telefono === dueno) return "tu";
+      if (datos.equipo[telefono]) return datos.equipo[telefono] === dueno ? "ya" : "otro";
+      if (datos.equipo[dueno]) return "empleado"; // un empleado no agrega gente
+      if (datos.movimientos.some((m) => m.usuario === telefono)) return "propio"; // ya lleva su propio negocio
+      datos.equipo[telefono] = dueno;
+      guardar();
+      return "ok";
+    },
+    quitarEmpleado(dueno, telefono) {
+      if (datos.equipo[telefono] !== dueno) return false;
+      delete datos.equipo[telefono];
+      guardar();
+      return true;
     },
     config: {
       get: (usuario, k) => datos.config[usuario]?.[k],

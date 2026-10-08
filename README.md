@@ -12,6 +12,9 @@ Estado: en construcción (versión mínima).
 - **Fiado**: `le fié 100 a Marta`, `Marta me pagó 50`, `quién me debe`. El fiado cuenta como venta y el cobro no se cuenta dos veces
 - **Crédito con proveedores**: `compré 500 a Don Pepe al crédito`; luego `pagué 200 a Don Pepe` descuenta la deuda en vez de duplicar el gasto. `debo` muestra lo que debes
 - **Hora del resumen**: cada quien la elige con `resumen a las 8` (o `no quiero resumen`)
+- **Meta del día**: `meta 1000` y el resumen muestra el avance (o 🎉 al cumplirla); `sin meta` la quita
+- **Más información en el resumen**: gastos por categoría (carnes, verduras, gas...) y lo más vendido
+- **Equipo**: `agrega a 5555 1234` deja que un empleado anote ventas y gastos en tu negocio. El empleado no ve reportes ni deudas, y `deshacer` solo borra lo suyo. `equipo` lista, `quita a 5555 1234` elimina
 - **Corregir**: `corrige 120` cambia el monto del último movimiento
 - **Errores**: `deshacer` borra lo último que anotó ese usuario
 - **Respaldo de IA**: si el bot no entiende un mensaje, se lo pregunta a Claude (necesita `ANTHROPIC_API_KEY`); la respuesta se valida antes de anotar nada

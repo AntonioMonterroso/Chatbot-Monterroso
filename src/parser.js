@@ -15,12 +15,15 @@ const ABONOS = tabla("abono", "abona", "abonaron", "abonar", "abonamos");
 const PAGOS_CLIENTE = tabla("pago", "paga", "pagan", "pagaron");
 const DEUDAS = tabla("fiado", "fiada", "debe", "deben", "debo", "debemos", "deuda", "deudas", "fiados", "pendientes", "cuentas");
 const CREDITO = tabla("fiado", "fiada", "credito", "fiar");
+const META = tabla("meta", "objetivo");
+const NEGACION = /^(no|sin|quita|quitar|elimina|borra|olvida)$/;
 const SUSTANTIVOS = tabla("ventas", "gastos", "compras");
 const COMANDOS = new Map([
   ...conValor("resumen", "resumen", "cierre", "reporte", "informe", "balance", "cuanto", "cuantos"),
   ...conValor("proveedores", "proveedores", "proveedor"),
   ...conValor("deshacer", "deshacer", "borrar", "borra", "anular", "anula", "cancelar", "cancela", "elimina", "eliminar", "equivoque"),
   ...conValor("corregir", "corrige", "corregir", "correccion", "cambia", "cambiar", "modifica", "modificar", "era"),
+  ...conValor("equipo", "equipo", "empleados", "empleado", "ayudantes", "personal"),
   ...conValor("ultimos", "ultimos", "ultimas", "movimientos", "historial", "lista"),
 ]);
 const AYUDA = tabla("ayuda", "ayudame", "menu", "help", "hola", "buenas", "buenos", "comandos", "instrucciones");
@@ -88,6 +91,19 @@ function tokenizar(texto) {
   return out;
 }
 
+// "agrega a 5025555 1234", "quita el empleado 55551234"
+function parsearEquipo(texto) {
+  const n = sinAcentos(texto.toLowerCase());
+  const tel = n.match(/(?:\+?\d[\s-]?){8,13}/);
+  if (!tel) return null;
+  let digitos = tel[0].replace(/\D/g, "");
+  if (digitos.length < 8) return null;
+  if (digitos.length === 8) digitos = `502${digitos}`; // número local de Guatemala
+  if (/(agreg|anad|inclu|suma|da(le)? acceso|autoriza)/.test(n)) return { tipo: "agregarEmpleado", telefono: digitos };
+  if (/(quit|elimin|saca|borra|remuev|desactiva)/.test(n)) return { tipo: "quitarEmpleado", telefono: digitos };
+  return null;
+}
+
 // "resumen a las 8", "mándame el cierre a las 9 pm", "no quiero resumen"
 function parsearHora(texto) {
   const n = sinAcentos(texto.toLowerCase());
@@ -131,12 +147,21 @@ export function parsearMensaje(texto) {
   const tokens = tokenizar(texto);
   if (!tokens.length) return { tipo: "desconocido" };
 
+  const equipo = parsearEquipo(texto);
+  if (equipo) return equipo;
   const hora = parsearHora(texto);
   if (hora) return hora;
 
   const hayNumero = tokens.some(esNumero);
   // "quién me debe", "fiados", "deudas"
   if (!hayNumero && tokens.some((t) => buscar(t.n, DEUDAS, false))) return { tipo: "deudas" };
+  // "meta 1000", "sin meta", "cuánto falta para la meta"
+  if (tokens.some((t) => !esNumero(t) && buscar(t.n, META, false))) {
+    const nums = tokens.filter(esNumero);
+    if (nums.length && nums[0].valor > 0) return { tipo: "meta", monto: redondear(nums[0].valor) };
+    if (tokens.some((t) => NEGACION.test(t.n))) return { tipo: "meta", monto: null };
+    return { tipo: "resumen", periodo: "hoy" };
+  }
   const abono = detectarAbono(tokens);
   if (abono) return abono;
 
@@ -149,6 +174,7 @@ export function parsearMensaje(texto) {
   if (cmd === "proveedores") return { tipo: "proveedores" };
   if (cmd === "deshacer") return { tipo: "deshacer" };
   if (cmd === "ultimos") return { tipo: "ultimos" };
+  if (cmd === "equipo") return { tipo: "equipo" };
   if (cmd === "corregir") {
     const numeros = tokens.filter(esNumero);
     return numeros.length && numeros.at(-1).valor > 0

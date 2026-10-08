@@ -1,4 +1,5 @@
 import { nombreDia, diaLocal, horaLocal } from "./tiempo.js";
+import { categoriaDe } from "./categorias.js";
 
 export const q = (n) =>
   `${n < 0 ? "-" : ""}Q${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -36,8 +37,20 @@ function comparar(actual, anterior, etiqueta) {
   return `Ventas vs ${etiqueta}: ${flecha} ${Math.abs(pct)}% (antes ${q(anterior)})`;
 }
 
-// opciones: { previos, etiquetaPrevio, multidia }
-export function armarResumen(movs, titulo = "Resumen de hoy", { previos = [], etiquetaPrevio, multidia = false } = {}) {
+// Lo más vendido según el detalle: "3 pollos" suma 3 a "pollo"; sin cantidad, suma 1.
+function masVendido(ventas) {
+  const conteo = new Map();
+  for (const m of ventas) {
+    if (!m.detalle) continue;
+    const mm = m.detalle.match(/^(\d+)\s+(?:(?:de|libras?|cajas?|platos?|ordenes)\s+)?(.+)$/i);
+    const nombre = (mm ? mm[2] : m.detalle).toLowerCase().trim().replace(/(?<=\w{3})s$/, "");
+    conteo.set(nombre, (conteo.get(nombre) ?? 0) + (mm ? Number(mm[1]) : 1));
+  }
+  return [...conteo].sort((a, b) => b[1] - a[1]).slice(0, 3);
+}
+
+// opciones: { previos, etiquetaPrevio, multidia, meta }
+export function armarResumen(movs, titulo = "Resumen de hoy", { previos = [], etiquetaPrevio, multidia = false, meta } = {}) {
   if (!movs.length) return `${titulo}\nSin movimientos registrados.`;
   const ventas = ventasDe(movs);
   const gastos = gastosDe(movs);
@@ -47,6 +60,11 @@ export function armarResumen(movs, titulo = "Resumen de hoy", { previos = [], et
     `Gastos: ${q(suma(gastos))} (${gastos.length})`,
     `Ganancia: ${q(suma(ventas) - suma(gastos))}`,
   ];
+
+  if (meta > 0) {
+    const total = suma(ventas);
+    lineas.push(total >= meta ? `🎉 ¡Meta del día cumplida! (${q(total)} de ${q(meta)})` : `Meta del día: ${Math.round((total / meta) * 100)}% (${q(total)} de ${q(meta)})`);
+  }
 
   const fiado = suma(ventas.filter((m) => m.metodo === "fiado"));
   const cobrado = suma(movs.filter((m) => m.tipo === "abono" && m.direccion === "cobrar"));
@@ -62,6 +80,14 @@ export function armarResumen(movs, titulo = "Resumen de hoy", { previos = [], et
     const [mejor, monto] = porDia[0];
     lineas.push(`Mejor día: ${nombreDia(mejor)} (${q(monto)})`);
     lineas.push(`Promedio por día con ventas: ${q(suma(ventas) / porDia.length)}`);
+  }
+
+  const vendido = masVendido(ventas);
+  if (vendido.length) lineas.push("", `Lo más vendido: ${vendido.map(([n, c]) => `${n} ×${c}`).join(", ")}`);
+
+  const porCategoria = agrupar(gastos, (m) => categoriaDe(m.detalle));
+  if (porCategoria.some(([c]) => c !== "otros")) {
+    lineas.push("", "Gastos por categoría:", ...porCategoria.slice(0, 4).map(([c, v]) => `- ${c}: ${q(v)}`));
   }
 
   const topGastos = agrupar(gastos, (m) => m.proveedor || m.detalle || "otros").slice(0, 3);
@@ -88,7 +114,8 @@ export function armarUltimos(movs, ahora = new Date()) {
     ...movs.map((m, i) => {
       const f = new Date(m.fecha);
       const dia = diaLocal(f) === hoy ? "hoy" : diaLocal(f);
-      return `${i + 1}. ${describir(m)} · ${dia} ${horaLocal(m.fecha)}`;
+      const por = m.registro && m.registro !== m.usuario ? ` · por …${m.registro.slice(-4)}` : "";
+      return `${i + 1}. ${describir(m)} · ${dia} ${horaLocal(m.fecha)}${por}`;
     }),
     'Para borrar el último escribe "deshacer"; para cambiar su monto, "corrige 120".',
   ].join("\n");

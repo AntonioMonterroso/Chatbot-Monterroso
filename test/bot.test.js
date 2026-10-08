@@ -240,3 +240,68 @@ test("el usuario elige la hora del resumen nocturno", async () => {
   await enviarResumenes(store, enviar, new Date("2026-10-10T05:00:00Z"));
   assert.equal(enviados.length, 1); // desactivado
 });
+
+const DUENO = "50255550001";
+const EMP = "50255550002";
+const di = (store, quien, texto, ahora) => responder({ usuario: quien, texto }, store, ahora);
+
+test("equipo: el empleado anota en el negocio del dueño pero no ve los reportes", () => {
+  const store = crearStore(null);
+  assert.match(di(store, DUENO, "agrega a 5555 0002"), /50255550002 ya puede anotar/);
+  assert.match(di(store, DUENO, "agrega a 5555 0002"), /ya está en tu equipo/);
+  assert.match(di(store, DUENO, "equipo"), /50255550002/);
+
+  assert.match(di(store, EMP, "vendi 80"), /Venta de Q80.00/);
+  di(store, DUENO, "vendi 20");
+
+  // el dueño ve todo junto; el empleado no ve reportes ni deudas
+  assert.match(di(store, DUENO, "resumen"), /Ventas: Q100.00 \(2\)/);
+  assert.match(di(store, EMP, "resumen"), /solo lo puede ver o cambiar el dueño/);
+  assert.match(di(store, EMP, "quien me debe"), /solo lo puede ver/);
+  assert.match(di(store, EMP, "agrega a 5555 0003"), /solo lo puede ver o cambiar el dueño/);
+
+  // "últimos": el dueño ve de quién es cada movimiento; el empleado solo los suyos
+  assert.match(di(store, DUENO, "ultimos"), /por …0002/);
+  assert.doesNotMatch(di(store, EMP, "ultimos"), /Q20.00/);
+
+  // deshacer solo toca lo propio
+  assert.match(di(store, EMP, "deshacer"), /Borré: Venta de Q80.00/);
+  assert.match(di(store, EMP, "deshacer"), /nada que borrar/);
+  assert.match(di(store, DUENO, "resumen"), /Ventas: Q20.00 \(1\)/);
+
+  assert.match(di(store, DUENO, "quita a 5555 0002"), /ya no está en tu equipo/);
+  assert.match(di(store, EMP, "resumen"), /Sin movimientos/); // vuelve a ser su propio negocio
+});
+
+test("equipo: casos que se rechazan", () => {
+  const store = crearStore(null);
+  assert.match(di(store, DUENO, `agrega a ${DUENO}`), /tu propio número/);
+  di(store, EMP, "vendi 10"); // EMP ya lleva su propio negocio
+  assert.match(di(store, DUENO, "agrega a 5555 0002"), /ya lleva su propio negocio/);
+});
+
+test("meta del día: muestra el avance y se puede quitar", () => {
+  const store = crearStore(null);
+  assert.match(di(store, U, "meta 1000"), /Meta del día: Q1,000.00/);
+  di(store, U, "vendi 250");
+  assert.match(di(store, U, "resumen"), /Meta del día: 25% \(Q250.00 de Q1,000.00\)/);
+  di(store, U, "vendi 800");
+  assert.match(di(store, U, "cuanto falta para la meta"), /Meta del día cumplida/);
+  assert.match(di(store, U, "sin meta"), /quité la meta/);
+  assert.doesNotMatch(di(store, U, "resumen"), /Meta/);
+});
+
+test("el resumen agrupa gastos por categoría y muestra lo más vendido", () => {
+  const store = crearStore(null);
+  di(store, U, "vendi 3 pollos a 45");
+  di(store, U, "vendi 2 pollos a 45");
+  di(store, U, "vendi 4 almuerzos a 30");
+  di(store, U, "gaste 200 en pollo a Don Pepe");
+  di(store, U, "gaste 90 en gas");
+  di(store, U, "gaste 60 en sebolla y tomate");
+  const r = di(store, U, "resumen");
+  assert.match(r, /Lo más vendido: pollo ×5, almuerzo ×4/);
+  assert.match(r, /- carnes: Q200.00/);
+  assert.match(r, /- gas y energía: Q90.00/);
+  assert.match(r, /- verduras y frutas: Q60.00/);
+});

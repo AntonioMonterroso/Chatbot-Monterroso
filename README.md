@@ -21,6 +21,9 @@ Estado: en construcción (versión mínima).
 - **Excel para el contador**: `exportar mes` (o `semana`, `ayer`...) manda un archivo CSV por WhatsApp. Las celdas que parecen fórmulas se neutralizan
 - **Bienvenida** la primera vez que alguien escribe
 - **Protección**: `NUMEROS_PERMITIDOS` limita quién puede usar el bot (sus empleados siempre pasan), máximo 20 mensajes por minuto por número, y mensajes de más de 1000 caracteres se rechazan
+- **Conversación**: si el bot pregunta ("¿de cuánto fue?"), basta responder `250` o `a Marta`; recuerda la pregunta por 5 minutos
+- **Cuadre de caja**: `caja inicial 200` fija el fondo; al cerrar, cuenta el efectivo y escribe `caja 850`: el bot dice cuánto debería haber y si sobra o falta (la tarjeta, el fiado y el crédito no cuentan como efectivo)
+- **Fiado viejo**: `quién me debe` marca las deudas de una semana o más ("hace 18 días")
 - **Corregir**: `corrige 120` cambia el monto del último movimiento
 - **Errores**: `deshacer` borra lo último que anotó ese usuario
 - **Respaldo de IA**: si el bot no entiende un mensaje, se lo pregunta a Claude (necesita `ANTHROPIC_API_KEY`); la respuesta se valida antes de anotar nada

@@ -1,5 +1,5 @@
-import { parsearVarios, validarInterpretacion } from "./parser.js";
-import { armarResumen, armarProveedores, armarUltimos, armarDeudas, describir, q } from "./summary.js";
+import { parsearMensaje, parsearVarios, validarInterpretacion } from "./parser.js";
+import { armarResumen, armarProveedores, armarUltimos, armarDeudas, armarCaja, describir, q } from "./summary.js";
 import { rango, rangoAnterior, nombreDia, diaLocal } from "./tiempo.js";
 import { armarCsv } from "./exportar.js";
 import { clavePersona } from "./texto.js";
@@ -14,6 +14,7 @@ Crédito: compré 500 a Don Pepe al crédito · pagué 200 a Don Pepe
 Reportes: resumen · ayer · semana · mes · proveedores · últimos
 Errores: deshacer (borra el último) · corrige 120 (cambia su monto)
 Fechas:  el lunes vendí 500 · ayer gasté 80 · resumen del lunes
+Caja:    caja inicial 200 · caja 850 (cuento y te digo si cuadra)
 Excel:   exportar mes (te mando un archivo para tu contador)
 Meta:    meta 1000 (te muestro el avance en el resumen)
 Equipo:  agrega a 5555 1234 (para que un empleado anote en tu negocio) · equipo
@@ -21,17 +22,38 @@ Equipo:  agrega a 5555 1234 (para que un empleado anote en tu negocio) · equipo
 No importa si escribes con faltas. Cada noche te mando el resumen del día; si lo quieres a otra hora, escribe "resumen a las 8".`;
 
 // Lo que un empleado no puede ver ni cambiar
-const SOLO_DUENO = new Set(["exportar", "resumen", "proveedores", "deudas", "hora", "meta", "equipo", "agregarEmpleado", "quitarEmpleado"]);
+const SOLO_DUENO = new Set(["caja", "fondo", "exportar", "resumen", "proveedores", "deudas", "hora", "meta", "equipo", "agregarEmpleado", "quitarEmpleado"]);
 
 const ETIQUETA_PREVIA = { dia: "el día anterior", hoy: "ayer", ayer: "anteayer", semana: "la semana anterior", mes: "el período anterior" };
 
 // Responde a un mensaje de texto. `ahora` se inyecta para poder probar fechas.
 export function responder({ usuario, texto }, store, ahora = new Date()) {
-  return ejecutarVarios(parsearVarios(texto, ahora), usuario, store, ahora);
+  texto = completarPendiente(usuario, texto, store, ahora);
+  return ejecutarVarios(parsearVarios(texto, ahora), usuario, store, ahora, texto);
+}
+
+const VIGENCIA_PENDIENTE_MS = 5 * 60_000;
+
+// Si el bot dejó una pregunta abierta ("¿de cuánto fue?") y la respuesta es corta ("250", "a Marta"),
+// se une a lo que ya se había dicho y se vuelve a interpretar: "vendí" + "250" = "vendí 250".
+function completarPendiente(usuario, texto, store, ahora) {
+  const pend = store.pendientes.get(usuario);
+  if (!pend) return texto;
+  store.pendientes.delete(usuario);
+  if (ahora.getTime() - pend.t > VIGENCIA_PENDIENTE_MS) return texto;
+  if (texto.trim().split(/\s+/).length > 4 || parsearMensaje(texto, ahora).tipo !== "desconocido") return texto; // trae su propio comando
+  const union = pend.fiar && !/^a\s/i.test(texto.trim()) ? `${pend.texto} a ${texto}` : `${pend.texto} ${texto}`;
+  const r = parsearMensaje(union, ahora);
+  // sirve si avanzó (de "falta el monto" a "falta el nombre", o a algo completo)
+  return r.tipo === "desconocido" || r.tipo === pend.tipo ? texto : union;
 }
 
 // Un mensaje puede traer varios movimientos: se anotan todos y se responde con una lista.
-function ejecutarVarios(lista, usuario, store, ahora) {
+function ejecutarVarios(lista, usuario, store, ahora, texto) {
+  const p0 = lista[0];
+  if (lista.length === 1 && (p0.tipo === "sinmonto" || p0.tipo === "sinpersona")) {
+    store.pendientes.set(usuario, { t: ahora.getTime(), texto, tipo: p0.tipo, fiar: p0.tipo === "sinpersona" && p0.accion === "fiar" });
+  }
   if (lista.length === 1) return ejecutar(lista[0], usuario, store, ahora);
   const anotados = [];
   const dudas = [];
@@ -150,8 +172,15 @@ function ejecutar(p, usuario, store, ahora) {
         documento: { nombre: `movimientos-${r.desde}-a-${r.hasta}.csv`, mime: "text/csv", buffer: Buffer.from(armarCsv(movs), "utf8") },
       };
     }
+    case "fondo":
+      store.config.set(negocio, "fondo", p.monto);
+      return `Fondo de caja: ${q(p.monto)} ✅ Cada día cuento desde ahí. Al cerrar, cuenta lo que hay y escribe: caja 850`;
+    case "caja": {
+      const r = rango("hoy", ahora);
+      return armarCaja(store.entre(negocio, r.desde, r.hasta), store.config.get(negocio, "fondo") ?? 0, p.monto);
+    }
     case "deudas":
-      return armarDeudas(store.saldos(negocio));
+      return armarDeudas(store.saldos(negocio), ahora);
     case "hora": {
       store.config.set(negocio, "hora", p.hora ?? -1);
       if (p.hora === null) return 'Listo, ya no te mando el resumen de la noche. Cuando lo quieras de vuelta, escribe "resumen a las 9".';
@@ -186,6 +215,8 @@ function ejecutar(p, usuario, store, ahora) {
     case "ayuda":
       return AYUDA;
     case "sinmonto":
+      if (p.fiado) return "¿Cuánto le fiaste? Ejemplo: le fié 100 a Marta";
+      if (p.venta === "fondo") return "¿Con cuánto dinero abres la caja? Ejemplo: caja inicial 200";
       if (p.venta === "abono") return "¿De cuánto fue el pago? Ejemplo: Marta me pagó 50";
       if (p.venta === "corregir") return "¿Cuál es el monto correcto? Ejemplo: corrige 120";
       return `¿De cuánto fue ${p.venta === "venta" ? "la venta" : "el gasto"}? Ejemplo: ${p.venta === "venta" ? "vendí 250" : "gasté 100 en pollo"}`;
@@ -198,6 +229,7 @@ function ejecutar(p, usuario, store, ahora) {
 
 // Si el parser local no entiende, le pregunta a la IA (si está configurada).
 async function responderConRespaldo({ usuario, texto }, store, deps, ahora) {
+  texto = completarPendiente(usuario, texto, store, ahora);
   const lista = parsearVarios(texto, ahora);
   if (lista.length === 1 && lista[0].tipo === "desconocido" && deps.interpretar) {
     try {
@@ -206,7 +238,7 @@ async function responderConRespaldo({ usuario, texto }, store, deps, ahora) {
       console.error("Respaldo de IA falló:", e.message);
     }
   }
-  return ejecutarVarios(lista, usuario, store, ahora);
+  return ejecutarVarios(lista, usuario, store, ahora, texto);
 }
 
 export const BIENVENIDA =

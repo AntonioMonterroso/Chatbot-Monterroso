@@ -37,6 +37,8 @@ const METODOS = new Map([
 const RELLENO = tabla("ya", "me", "se", "acabo", "acabamos", "oye", "hey", "pues", "porfa", "favor", "por", "apunta", "anota", "registra", "anotame", "apuntame", "registrame", "quiero", "necesito", "de", "un", "una", "el", "la", "los", "las", "mi", "mis", "hice", "fue", "fueron", "y");
 const PERIODO_EXACTO = tabla("hoy", "ayer", "anteayer", "antier");
 const DIAS_SEMANA = new Map([["domingo", 0], ["lunes", 1], ["martes", 2], ["miercoles", 3], ["jueves", 4], ["viernes", 5], ["sabado", 6]]);
+const CAJA = tabla("caja", "cuadre", "arqueo");
+const FONDO = tabla("fondo", "inicial", "base", "apertura", "abri", "abrimos", "arranque");
 const EXPORTAR = tabla("excel", "csv", "exportar", "exporta", "exportame", "descargar", "descarga", "planilla");
 
 // "ayer", "anteayer", "el lunes": cuántos días atrás y qué palabras lo dicen.
@@ -122,6 +124,13 @@ function tokenizar(texto) {
   return out;
 }
 
+// ¿Hay un verbo de venta/gasto/fiado entre las primeras palabras?
+function hayVerbo(tokens) {
+  return tokens
+    .slice(0, 5)
+    .some((t) => !esNumero(t) && !buscar(t.n, SUSTANTIVOS, false) && !!buscar(t.n, VERBOS));
+}
+
 // "agrega a 5025555 1234", "quita el empleado 55551234"
 function parsearEquipo(texto) {
   const n = sinAcentos(texto.toLowerCase());
@@ -199,6 +208,16 @@ export function parsearMensaje(texto, ahora = new Date()) {
   }
   const abono = detectarAbono(tokens);
   if (abono) return abono;
+
+  // "caja 850", "tengo 850 en caja", "cierre de caja", "caja inicial 200".
+  // Si hay un verbo ("compré una caja de refresco") es un movimiento, no la caja.
+  if (tokens.some((t) => !esNumero(t) && (buscar(t.n, CAJA, false) || t.n === "fondo")) && !hayVerbo(tokens)) {
+    const monto = tokens.find(esNumero)?.valor;
+    if (tokens.some((t) => !esNumero(t) && buscar(t.n, FONDO, false))) {
+      return monto > 0 ? { tipo: "fondo", monto: redondear(monto) } : { tipo: "sinmonto", venta: "fondo" };
+    }
+    return { tipo: "caja", monto: monto >= 0 ? redondear(monto) : null };
+  }
 
   const primero = tokens.findIndex((t) => !esNumero(t) && !RELLENO.has(t.n));
   const cmd = primero >= 0 ? buscar(tokens[primero].n, COMANDOS) : undefined;
@@ -307,7 +326,7 @@ export function parsearMensaje(texto, ahora = new Date()) {
       usados.add(elegido.i);
     }
   }
-  if (!(monto > 0)) return { tipo: "sinmonto", venta: tipo };
+  if (!(monto > 0)) return { tipo: "sinmonto", venta: tipo, ...(fiado && { fiado: true }) };
 
   // Proveedor ("... a Don Pepe") en gastos, o cliente en un fiado
   let proveedor = null;

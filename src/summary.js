@@ -1,4 +1,4 @@
-import { nombreDia, diaLocal, horaLocal } from "./tiempo.js";
+import { nombreDia, diaLocal, horaLocal, diasEntre } from "./tiempo.js";
 import { categoriaDe } from "./categorias.js";
 
 export const q = (n) =>
@@ -121,15 +121,50 @@ export function armarUltimos(movs, ahora = new Date()) {
   ].join("\n");
 }
 
-export function armarDeudas({ cobrar, pagar }) {
+export function armarDeudas({ cobrar, pagar }, ahora = new Date()) {
   const lista = (mapa) => [...mapa.values()].sort((a, b) => b.monto - a.monto);
   const total = (mapa) => lista(mapa).reduce((a, x) => a + x.monto, 0);
+  // "hace 12 días" cuando la deuda tiene una semana o más
+  const antiguedad = (x) => {
+    const dias = x.desde ? diasEntre(diaLocal(new Date(x.desde)), diaLocal(ahora)) - 1 : 0;
+    return dias >= 7 ? ` (hace ${dias} días)` : "";
+  };
   if (!cobrar.size && !pagar.size) return "No hay cuentas pendientes. 🎉";
   const lineas = [];
-  if (cobrar.size) lineas.push(`Te deben ${q(total(cobrar))}:`, ...lista(cobrar).map((x) => `- ${x.nombre}: ${q(x.monto)}`));
+  if (cobrar.size) lineas.push(`Te deben ${q(total(cobrar))}:`, ...lista(cobrar).map((x) => `- ${x.nombre}: ${q(x.monto)}${antiguedad(x)}`));
   if (pagar.size) {
     if (lineas.length) lineas.push("");
-    lineas.push(`Debes ${q(total(pagar))}:`, ...lista(pagar).map((x) => `- ${x.nombre}: ${q(x.monto)}`));
+    lineas.push(`Debes ${q(total(pagar))}:`, ...lista(pagar).map((x) => `- ${x.nombre}: ${q(x.monto)}${antiguedad(x)}`));
+  }
+  return lineas.join("\n");
+}
+
+// Cuadre de caja: lo que debería haber en efectivo = fondo + ventas en efectivo + cobros - gastos en efectivo - pagos.
+// Se asume efectivo cuando no se dijo otro método; tarjeta, transferencia y fiado no entran a la caja.
+export function armarCaja(movs, fondo = 0, contado = null) {
+  const efectivo = (m) => !m.metodo || m.metodo === "efectivo";
+  const ventas = suma(ventasDe(movs).filter(efectivo));
+  const cobros = suma(movs.filter((m) => m.tipo === "abono" && m.direccion === "cobrar"));
+  const gastos = suma(gastosDe(movs).filter((m) => efectivo(m) && !m.credito));
+  const pagos = suma(movs.filter((m) => m.tipo === "abono" && m.direccion === "pagar"));
+  const otros = suma(ventasDe(movs).filter((m) => m.metodo === "tarjeta" || m.metodo === "transferencia"));
+  const esperado = Math.round((fondo + ventas + cobros - gastos - pagos) * 100) / 100;
+
+  const lineas = [
+    "Caja de hoy",
+    `Fondo inicial: ${q(fondo)}`,
+    `+ Ventas en efectivo: ${q(ventas)}`,
+    ...(cobros ? [`+ Cobros de fiado: ${q(cobros)}`] : []),
+    `- Gastos en efectivo: ${q(gastos)}`,
+    ...(pagos ? [`- Pagos a proveedores: ${q(pagos)}`] : []),
+    `= Debería haber: ${q(esperado)}`,
+  ];
+  if (otros) lineas.push(`(Ventas con tarjeta o transferencia, que no van en caja: ${q(otros)})`);
+  if (contado === null) {
+    lineas.push("", "Cuenta lo que hay y escríbeme: caja 850");
+  } else {
+    const dif = Math.round((contado - esperado) * 100) / 100;
+    lineas.push("", `Contaste: ${q(contado)}`, Math.abs(dif) < 0.005 ? "✅ La caja cuadra." : dif > 0 ? `⚠️ Sobran ${q(dif)}.` : `⚠️ Faltan ${q(-dif)}.`);
   }
   return lineas.join("\n");
 }

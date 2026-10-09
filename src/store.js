@@ -78,18 +78,19 @@ export function crearStore(ruta = "data/diario.jsonl") {
     saldos(usuario) {
       const cobrar = new Map();
       const pagar = new Map();
-      const mover = (mapa, nombre, monto) => {
+      const mover = (mapa, nombre, monto, fecha) => {
         const k = clavePersona(nombre);
         const actual = mapa.get(k) ?? { nombre, monto: 0 };
+        if (monto > 0 && actual.monto < 0.005) actual.desde = fecha; // empieza una deuda nueva
         actual.monto = Math.round((actual.monto + monto) * 100) / 100;
         mapa.set(k, actual);
       };
       for (const m of datos.movimientos) {
         if (m.usuario !== usuario) continue;
-        if (m.tipo === "venta" && m.metodo === "fiado" && m.persona) mover(cobrar, m.persona, m.monto);
-        else if (m.tipo === "gasto" && m.credito && m.proveedor) mover(pagar, m.proveedor, m.monto);
-        else if (m.tipo === "abono" && m.direccion === "cobrar") mover(cobrar, m.persona, -m.monto);
-        else if (m.tipo === "abono" && m.direccion === "pagar") mover(pagar, m.persona, -m.monto);
+        if (m.tipo === "venta" && m.metodo === "fiado" && m.persona) mover(cobrar, m.persona, m.monto, m.fecha);
+        else if (m.tipo === "gasto" && m.credito && m.proveedor) mover(pagar, m.proveedor, m.monto, m.fecha);
+        else if (m.tipo === "abono" && m.direccion === "cobrar") mover(cobrar, m.persona, -m.monto, m.fecha);
+        else if (m.tipo === "abono" && m.direccion === "pagar") mover(pagar, m.persona, -m.monto, m.fecha);
       }
       for (const mapa of [cobrar, pagar]) for (const [k, v] of mapa) if (v.monto < 0.005) mapa.delete(k);
       return { cobrar, pagar };
@@ -114,6 +115,8 @@ export function crearStore(ruta = "data/diario.jsonl") {
       get: (usuario, k) => datos.config[usuario]?.[k],
       set: (usuario, k, v) => commit({ op: "cfg", u: usuario, k, v }),
     },
+    // Preguntas que el bot dejó abiertas ("¿de cuánto fue?"); solo en memoria, no se guardan
+    pendientes: new Map(),
     // Cierra el archivo (para apagar con calma y en pruebas)
     cerrar: () => diario?.cerrar(),
     usuarios() {

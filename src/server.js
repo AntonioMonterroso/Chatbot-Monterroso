@@ -93,4 +93,11 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const servidor = crearServidor({ store });
   servidor.listen(port, () => console.log(`Monterroso Chat escuchando en :${port}`));
   iniciarResumenNocturno({ store, enviar: enviarTexto, hora: Number(process.env.RESUMEN_HORA ?? 21) });
+  for (const senal of ["SIGINT", "SIGTERM"]) {
+    process.on(senal, () => {
+      servidor.close();
+      store.cerrar();
+      process.exit(0);
+    });
+  }
 }

@@ -6,6 +6,8 @@ Estado: en construcción (versión mínima).
 
 ## Qué hace
 
+**Datos**: se guardan en `data/diario.jsonl`, un diario donde cada cambio es una línea que se agrega (a prueba de cortes de luz: si una línea queda a medias solo se pierde esa, y se guarda copia en `.bak`). Si venías del archivo anterior `data/db.json`, se migra solo. En un servicio en la nube, monta un disco persistente en `data/` o los datos se pierden al reiniciar.
+
 - **Texto** (tolera faltas de ortografía, mayúsculas y jerga: `bendi 250`, `gaste cien en cebolla`, `vendi 2k`, `ayer vendi 500`): `vendí 250` · `vendí 3 pollos a 45` · `vendí 500 con tarjeta` · `gasté 100 en pollo` · `compré 80 tomates a Don Pepe` · `pagué 500 a Don Pepe`
 - **Varias cosas a la vez**: `vendí 100 y gasté 40 en hielo`, `vendí 3 pollos a 45 y 2 cervezas a 20`, o una por línea
 - **Reportes**: `resumen` · `ayer` · `semana` · `mes` · `proveedores` · `últimos`. Comparan con el período anterior (▲/▼), la semana y el mes muestran mejor día y promedio, y avisan si se gastó más de lo vendido
@@ -41,5 +43,5 @@ npm test
 
 - Probar voz, fotos y envío real contra WhatsApp (hoy cubiertos solo con pruebas simuladas)
 - Mensajes de plantilla: WhatsApp solo deja escribir primero al usuario dentro de 24 h de su último mensaje; para el resumen nocturno fuera de esa ventana hace falta una plantilla aprobada por Meta
-- Base de datos real (hoy un JSON en `data/`)
+- Si se corre en más de un servidor a la vez, pasar a Postgres/SQLite (hoy el diario es de un solo proceso)
 - Varios restaurantes / varios empleados por restaurante

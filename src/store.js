@@ -1,37 +1,49 @@
-import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, copyFileSync } from "node:fs";
 import { diaLocal } from "./tiempo.js";
 import { clavePersona } from "./texto.js";
+import { aplicar, cargar, compactar, abrirParaAgregar, estadoVacio } from "./diario.js";
 
-// Almacén mínimo en un archivo JSON. Se reemplazará por una base de datos real.
-// Con ruta = null vive solo en memoria (tests y chat de terminal).
-export function crearStore(ruta = "data/db.json") {
-  let datos = { movimientos: [], meta: {}, config: {}, equipo: {} };
-  if (ruta && existsSync(ruta)) datos = { ...datos, ...JSON.parse(readFileSync(ruta, "utf8")) };
+// Almacén de datos. Con ruta, persiste en un diario (ver diario.js); con ruta = null vive solo en
+// memoria (tests y chat de terminal). Todo cambio pasa por `commit`: primero al disco, luego a memoria.
+export function crearStore(ruta = "data/diario.jsonl") {
+  let datos = estadoVacio();
+  let diario = null;
+
+  if (ruta) {
+    // Instalaciones anteriores guardaban todo en data/db.json: se migra solo al primer arranque
+    const anterior = ruta.replace(/diario\.jsonl$/, "db.json");
+    if (!existsSync(ruta) && anterior !== ruta && existsSync(anterior)) copyFileSync(anterior, ruta);
+    const leido = cargar(ruta);
+    datos = leido.datos;
+    leido.avisos.forEach((a) => console.warn(`[datos] ${a}`));
+    // los movimientos del formato anterior no tenían id
+    let max = datos.movimientos.reduce((m, x) => Math.max(m, x.id ?? 0), 0);
+    for (const m of datos.movimientos) m.id ??= ++max;
+    const demasiadoLargo = leido.lineas > 1000 && leido.lineas > 3 * (datos.movimientos.length + 1);
+    if (leido.sucio || demasiadoLargo) compactar(ruta, datos);
+    diario = abrirParaAgregar(ruta);
+  }
 
   let sigId = datos.movimientos.reduce((max, m) => Math.max(max, m.id ?? 0), 0);
-  for (const m of datos.movimientos) m.id ??= ++sigId;
 
-  function guardar() {
-    if (!ruta) return;
-    mkdirSync(dirname(ruta), { recursive: true });
-    writeFileSync(`${ruta}.tmp`, JSON.stringify(datos, null, 2));
-    renameSync(`${ruta}.tmp`, ruta); // escritura atómica
+  function commit(op) {
+    diario?.escribir(op); // si el disco falla, la excepción sale y la memoria no cambia
+    aplicar(datos, op);
   }
 
   return {
     agregar(mov) {
-      const registro = { id: ++sigId, ...mov, fecha: mov.fecha ?? new Date().toISOString() };
-      datos.movimientos.push(registro);
-      guardar();
+      const registro = { id: sigId + 1, ...mov, fecha: mov.fecha ?? new Date().toISOString() };
+      commit({ op: "mov+", m: registro });
+      sigId = registro.id;
       return registro;
     },
     // `por`: quién lo anotó (un empleado solo deshace/corrige lo suyo)
     deshacerUltimo(usuario, por = usuario) {
       for (let i = datos.movimientos.length - 1; i >= 0; i--) {
         if (datos.movimientos[i].usuario === usuario && (datos.movimientos[i].registro ?? usuario) === por) {
-          const [quitado] = datos.movimientos.splice(i, 1);
-          guardar();
+          const quitado = datos.movimientos[i];
+          commit({ op: "mov-", id: quitado.id });
           return quitado;
         }
       }
@@ -49,8 +61,7 @@ export function crearStore(ruta = "data/db.json") {
         const m = datos.movimientos[i];
         if (m.usuario === usuario && (m.registro ?? usuario) === por) {
           const antes = m.monto;
-          m.monto = monto;
-          guardar();
+          commit({ op: "mov~", id: m.id, campos: { monto } });
           return { mov: m, antes };
         }
       }
@@ -91,32 +102,26 @@ export function crearStore(ruta = "data/db.json") {
       if (datos.equipo[telefono]) return datos.equipo[telefono] === dueno ? "ya" : "otro";
       if (datos.equipo[dueno]) return "empleado"; // un empleado no agrega gente
       if (datos.movimientos.some((m) => m.usuario === telefono)) return "propio"; // ya lleva su propio negocio
-      datos.equipo[telefono] = dueno;
-      guardar();
+      commit({ op: "eq+", tel: telefono, dueno });
       return "ok";
     },
     quitarEmpleado(dueno, telefono) {
       if (datos.equipo[telefono] !== dueno) return false;
-      delete datos.equipo[telefono];
-      guardar();
+      commit({ op: "eq-", tel: telefono });
       return true;
     },
     config: {
       get: (usuario, k) => datos.config[usuario]?.[k],
-      set(usuario, k, v) {
-        (datos.config[usuario] ??= {})[k] = v;
-        guardar();
-      },
+      set: (usuario, k, v) => commit({ op: "cfg", u: usuario, k, v }),
     },
+    // Cierra el archivo (para apagar con calma y en pruebas)
+    cerrar: () => diario?.cerrar(),
     usuarios() {
       return [...new Set(datos.movimientos.map((m) => m.usuario))];
     },
     meta: {
       get: (k) => datos.meta[k],
-      set(k, v) {
-        datos.meta[k] = v;
-        guardar();
-      },
+      set: (k, v) => commit({ op: "meta", k, v }),
     },
   };
 }

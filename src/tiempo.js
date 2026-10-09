@@ -10,9 +10,13 @@ export function sumarDias(dia, n) {
   return d.toISOString().slice(0, 10);
 }
 
-export function rango(periodo, ahora = new Date()) {
+export function rango(periodo, ahora = new Date(), hace = 0) {
   const hoy = diaLocal(ahora);
   switch (periodo) {
+    case "dia": {
+      const d = sumarDias(hoy, -hace);
+      return { desde: d, hasta: d, titulo: `Resumen del ${nombreDia(d)}` };
+    }
     case "ayer": {
       const a = sumarDias(hoy, -1);
       return { desde: a, hasta: a, titulo: "Resumen de ayer" };

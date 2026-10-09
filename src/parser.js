@@ -2,6 +2,7 @@
 //   "bendi 3 pollos a 45", "gaste en pollo 100", "compre tomates a Don Pepe 80",
 //   "vendí doscientos cincuenta", "rresumen de la semana", "me equivoque"
 import { sinAcentos, buscar, valorPalabraNumero, numeroDePalabras } from "./texto.js";
+import { aLocal } from "./tiempo.js";
 
 const tabla = (...palabras) => new Map(palabras.map((p) => [p, true]));
 const conValor = (valor, ...palabras) => palabras.map((p) => [p, valor]);
@@ -34,7 +35,37 @@ const METODOS = new Map([
   ...conValor("transferencia", "transferencia", "deposito"),
 ]);
 const RELLENO = tabla("ya", "me", "se", "acabo", "acabamos", "oye", "hey", "pues", "porfa", "favor", "por", "apunta", "anota", "registra", "anotame", "apuntame", "registrame", "quiero", "necesito", "de", "un", "una", "el", "la", "los", "las", "mi", "mis", "hice", "fue", "fueron", "y");
-const PERIODO_EXACTO = tabla("hoy", "ayer");
+const PERIODO_EXACTO = tabla("hoy", "ayer", "anteayer", "antier");
+const DIAS_SEMANA = new Map([["domingo", 0], ["lunes", 1], ["martes", 2], ["miercoles", 3], ["jueves", 4], ["viernes", 5], ["sabado", 6]]);
+const EXPORTAR = tabla("excel", "csv", "exportar", "exporta", "exportame", "descargar", "descarga", "planilla");
+
+// "ayer", "anteayer", "el lunes": cuántos días atrás y qué palabras lo dicen.
+// Un día de la semana es el más reciente que ya pasó; si es el mismo día de hoy, se toma como hoy.
+function diasAtras(tokens, ahora) {
+  const hoy = aLocal(ahora).getUTCDay();
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (esNumero(t)) continue;
+    let hace;
+    if (t.n === "ayer") hace = 1;
+    else if (t.n === "anteayer" || t.n === "antier") hace = 2;
+    else {
+      const d = buscar(t.n, DIAS_SEMANA);
+      if (d !== undefined) hace = (hoy - d + 7) % 7;
+    }
+    if (hace === undefined) continue;
+    const idx = [i];
+    if (/^(el|del|este|pasado)$/.test(tokens[i - 1]?.n ?? "")) idx.push(i - 1);
+    return { hace, idx, ayer: t.n === "ayer" };
+  }
+  return null;
+}
+
+// Período de un resumen: ayer / semana / mes / hoy, o un día puntual ("el lunes").
+function periodoDe(tokens, dia) {
+  if (dia && !dia.ayer) return { periodo: "dia", hace: dia.hace };
+  return { periodo: tokens.map((t) => buscar(t.n, PERIODOS)).find(Boolean) ?? "hoy" };
+}
 const MONEDA = tabla("q", "qtz", "quetzal", "quetzales");
 const PREPOSICIONES_INICIO = /^(en|de|por|para|con|a|la|el|los|las|un|una|mi|mis)$/;
 
@@ -143,8 +174,8 @@ function detectarAbono(tokens) {
   return null;
 }
 
-export function parsearMensaje(texto) {
-  const tokens = tokenizar(texto);
+export function parsearMensaje(texto, ahora = new Date()) {
+  const tokens = tokenizar(texto.replace(/antes\s+de\s+ayer/gi, "anteayer"));
   if (!tokens.length) return { tipo: "desconocido" };
 
   const equipo = parsearEquipo(texto);
@@ -162,15 +193,20 @@ export function parsearMensaje(texto) {
     if (tokens.some((t) => NEGACION.test(t.n))) return { tipo: "meta", monto: null };
     return { tipo: "resumen", periodo: "hoy" };
   }
+  if (!hayNumero && tokens.some((t) => !esNumero(t) && buscar(t.n, EXPORTAR, false))) {
+    const exp = tokens.map((t) => buscar(t.n, PERIODOS)).find(Boolean);
+    return { tipo: "exportar", periodo: exp === "hoy" || exp === "ayer" || exp === "semana" ? exp : "mes" };
+  }
   const abono = detectarAbono(tokens);
   if (abono) return abono;
 
   const primero = tokens.findIndex((t) => !esNumero(t) && !RELLENO.has(t.n));
   const cmd = primero >= 0 ? buscar(tokens[primero].n, COMANDOS) : undefined;
-  const periodo = tokens.map((t) => buscar(t.n, PERIODOS)).find(Boolean) ?? "hoy";
+  const dia = diasAtras(tokens, ahora);
+  const per = periodoDe(tokens, dia);
 
   // 1. Comandos claros: resumen, proveedores, deshacer
-  if (cmd === "resumen") return { tipo: "resumen", periodo };
+  if (cmd === "resumen") return { tipo: "resumen", ...per };
   if (cmd === "proveedores") return { tipo: "proveedores" };
   if (cmd === "deshacer") return { tipo: "deshacer" };
   if (cmd === "ultimos") return { tipo: "ultimos" };
@@ -200,9 +236,9 @@ export function parsearMensaje(texto) {
 
   // "ventas de hoy", "gastos de la semana": sin monto, es un pedido de resumen
   if (!tipo || iVerbo < 0) {
-    if (tokens.length <= 4 && tokens.some((t) => buscar(t.n, SUSTANTIVOS))) return { tipo: "resumen", periodo };
+    if (tokens.length <= 4 && tokens.some((t) => buscar(t.n, SUSTANTIVOS))) return { tipo: "resumen", ...per };
     const p = primero >= 0 ? buscar(tokens[primero].n, PERIODOS) : undefined;
-    if (p) return { tipo: "resumen", periodo: p };
+    if (p || (dia && !hayNumero)) return { tipo: "resumen", ...per };
     if (primero >= 0 && buscar(tokens[primero].n, AYUDA)) return { tipo: "ayuda" };
     return { tipo: "desconocido" };
   }
@@ -212,7 +248,6 @@ export function parsearMensaje(texto) {
   tokens.forEach((t, i) => {
     if (i < iVerbo && !esNumero(t)) usados.add(i);
   });
-  const ayer = tokens.some((t) => !esNumero(t) && t.n === "ayer");
   const resto = () => tokens.map((t, i) => ({ ...t, i })).filter((t) => !usados.has(t.i));
 
   // Crédito / fiado: "vendí 100 fiado a Marta", "compré 500 a Don Pepe al crédito"
@@ -227,8 +262,9 @@ export function parsearMensaje(texto) {
   const fiado = credito && (tipo === "fiado" || tipo === "venta");
   if (tipo === "fiado") tipo = "venta";
 
-  // "hoy"/"ayer" dentro de una venta o gasto no son parte del detalle
+  // "hoy"/"ayer"/"el lunes" dentro de una venta o gasto dicen la fecha; no son parte del detalle
   for (const t of resto()) if (!esNumero(t) && PERIODO_EXACTO.has(t.n)) usados.add(t.i);
+  if (dia) for (const i of dia.idx) usados.add(i);
 
   // Método de pago
   let metodo = null;
@@ -302,14 +338,14 @@ export function parsearMensaje(texto) {
       detalle = "";
     }
     if (!persona) return { tipo: "sinpersona", accion: "fiar" };
-    return { tipo: "venta", monto, detalle, proveedor: null, metodo: "fiado", persona, ...(ayer && { ayer: true }) };
+    return { tipo: "venta", monto, detalle, proveedor: null, metodo: "fiado", persona, ...(dia && { hace: dia.hace }) };
   }
-  return { tipo, monto, detalle, proveedor, metodo, ...(credito && tipo === "gasto" && { credito: true }), ...(ayer && { ayer: true }) };
+  return { tipo, monto, detalle, proveedor, metodo, ...(credito && tipo === "gasto" && { credito: true }), ...(dia && { hace: dia.hace }) };
 }
 
 // "vendí 100 y gasté 50", "vendí 3 pollos a 45 y 2 cervezas a 20", varias líneas...
 // Devuelve una lista con un resultado por cada movimiento que encuentre.
-export function parsearVarios(texto) {
+export function parsearVarios(texto, ahora = new Date()) {
   const esVerbo = (n) => !buscar(n, SUSTANTIVOS, false) && !/^fiad[oa]$/.test(n) && !!buscar(n, VERBOS);
   const empiezaConDigito = (n) => /^[q$]?\.?\d/.test(n);
   const empiezaConNumero = (n) => empiezaConDigito(n) || !!valorPalabraNumero(n);
@@ -349,7 +385,7 @@ export function parsearVarios(texto) {
 
     for (const seg of segmentos) {
       const t = seg.join(" ").replace(/(\s+(y|e|le|les|me|se|ya))+$/i, "").trim();
-      if (t) resultados.push(parsearMensaje(t));
+      if (t) resultados.push(parsearMensaje(t, ahora));
     }
   }
   return resultados.length ? resultados : [{ tipo: "desconocido" }];

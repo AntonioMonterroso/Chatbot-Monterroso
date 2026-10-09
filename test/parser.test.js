@@ -84,8 +84,8 @@ test("no confunde palabras comunes con comandos", () => {
 test("preámbulo y fecha", () => {
   const g = p("anota gasto de 60 en cebolla");
   assert.equal(g.detalle, "cebolla");
-  assert.equal(p("ayer vendi 500").ayer, true);
-  assert.equal(p("vendi 500").ayer, undefined);
+  assert.equal(p("ayer vendi 500").hace, 1);
+  assert.equal(p("vendi 500").hace, undefined);
 });
 
 import { parsearVarios } from "../src/parser.js";

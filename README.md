@@ -15,6 +15,10 @@ Estado: en construcción (versión mínima).
 - **Meta del día**: `meta 1000` y el resumen muestra el avance (o 🎉 al cumplirla); `sin meta` la quita
 - **Más información en el resumen**: gastos por categoría (carnes, verduras, gas...) y lo más vendido
 - **Equipo**: `agrega a 5555 1234` deja que un empleado anote ventas y gastos en tu negocio. El empleado no ve reportes ni deudas, y `deshacer` solo borra lo suyo. `equipo` lista, `quita a 5555 1234` elimina
+- **Fechas pasadas**: `el lunes vendí 500`, `ayer gasté 80`, `anteayer...`; y reportes de un día: `resumen del lunes`
+- **Excel para el contador**: `exportar mes` (o `semana`, `ayer`...) manda un archivo CSV por WhatsApp. Las celdas que parecen fórmulas se neutralizan
+- **Bienvenida** la primera vez que alguien escribe
+- **Protección**: `NUMEROS_PERMITIDOS` limita quién puede usar el bot (sus empleados siempre pasan), máximo 20 mensajes por minuto por número, y mensajes de más de 1000 caracteres se rechazan
 - **Corregir**: `corrige 120` cambia el monto del último movimiento
 - **Errores**: `deshacer` borra lo último que anotó ese usuario
 - **Respaldo de IA**: si el bot no entiende un mensaje, se lo pregunta a Claude (necesita `ANTHROPIC_API_KEY`); la respuesta se valida antes de anotar nada

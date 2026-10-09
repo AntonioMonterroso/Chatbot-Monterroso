@@ -47,3 +47,30 @@ export async function enviarTexto(para, texto, env = process.env) {
   });
   if (!res.ok) console.error("Error enviando a WhatsApp:", res.status, await res.text());
 }
+
+// Sube un archivo a WhatsApp y lo manda como documento, con `texto` de pie.
+export async function enviarDocumento(para, doc, texto, env = process.env) {
+  if (!env.WHATSAPP_ACCESS_TOKEN || !env.WHATSAPP_PHONE_NUMBER_ID) {
+    console.log(`[sin credenciales] -> ${para}: [archivo ${doc.nombre}] ${texto}`);
+    return;
+  }
+  const auth = { Authorization: `Bearer ${env.WHATSAPP_ACCESS_TOKEN}` };
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("type", doc.mime);
+  form.append("file", new Blob([doc.buffer], { type: doc.mime }), doc.nombre);
+  const subida = await fetch(`${GRAPH}/${env.WHATSAPP_PHONE_NUMBER_ID}/media`, { method: "POST", headers: auth, body: form });
+  if (!subida.ok) throw new Error(`No pude subir el archivo: ${subida.status} ${await subida.text()}`);
+  const { id } = await subida.json();
+  const res = await fetch(`${GRAPH}/${env.WHATSAPP_PHONE_NUMBER_ID}/messages`, {
+    method: "POST",
+    headers: { ...auth, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: para,
+      type: "document",
+      document: { id, filename: doc.nombre, caption: texto },
+    }),
+  });
+  if (!res.ok) throw new Error(`No pude enviar el archivo: ${res.status} ${await res.text()}`);
+}

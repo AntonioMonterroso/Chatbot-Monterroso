@@ -1,5 +1,6 @@
 // Chat por terminal para probar el bot sin WhatsApp: npm run chat
 import { createInterface } from "node:readline";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { crearStore } from "../src/store.js";
 import { procesar } from "../src/bot.js";
 import { interpretarMensaje } from "../src/ia.js";
@@ -13,6 +14,14 @@ rl.prompt();
 
 for await (const linea of rl) {
   const texto = linea.trim();
-  if (texto) console.log(`bot > ${await procesar({ usuario: "terminal", tipo: "text", texto }, store, deps)}\n`);
+  if (texto) {
+    const r = await procesar({ usuario: "terminal", tipo: "text", texto }, store, deps);
+    if (typeof r === "string") console.log(`bot > ${r}\n`);
+    else {
+      mkdirSync("exportes", { recursive: true });
+      writeFileSync(`exportes/${r.documento.nombre}`, r.documento.buffer);
+      console.log(`bot > ${r.texto}\n      📎 Archivo guardado en exportes/${r.documento.nombre}\n`);
+    }
+  }
   rl.prompt();
 }

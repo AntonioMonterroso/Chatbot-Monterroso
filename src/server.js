@@ -1,7 +1,8 @@
 import { createServer } from "node:http";
 import { crearStore } from "./store.js";
 import { procesar } from "./bot.js";
-import { extraerMensajes, firmaValida, enviarTexto, descargarMedia } from "./whatsapp.js";
+import { extraerMensajes, firmaValida, enviarTexto, enviarDocumento, descargarMedia } from "./whatsapp.js";
+import { crearLimitador } from "./limitador.js";
 import { transcribirAudio, leerRecibo, interpretarMensaje } from "./ia.js";
 import { iniciarResumenNocturno } from "./scheduler.js";
 
@@ -17,9 +18,13 @@ function depsDesdeEnv(env) {
   return deps;
 }
 
-export function crearServidor({ store, env = process.env, enviar = enviarTexto, deps } = {}) {
+export function crearServidor({ store, env = process.env, enviar = enviarTexto, enviarDoc = enviarDocumento, deps, limitador } = {}) {
   store ??= crearStore();
   deps ??= depsDesdeEnv(env);
+  limitador ??= crearLimitador();
+  // Si se define NUMEROS_PERMITIDOS, solo esos números (y sus empleados) pueden usar el bot
+  const permitidos = new Set((env.NUMEROS_PERMITIDOS ?? "").split(",").map((n) => n.trim()).filter(Boolean));
+  const autorizado = (u) => !permitidos.size || permitidos.has(u) || store.negocioDe(u) !== u;
   const vistos = new Set(); // Meta reintenta entregas: evita anotar dos veces
 
   return createServer(async (req, res) => {
@@ -59,8 +64,18 @@ export function crearServidor({ store, env = process.env, enviar = enviarTexto, 
           vistos.add(msg.id);
           if (vistos.size > 1000) vistos.delete(vistos.values().next().value);
         }
+        if (!autorizado(msg.usuario)) {
+          console.warn(`Mensaje ignorado de un número no autorizado: …${msg.usuario.slice(-4)}`);
+          continue;
+        }
+        if (!limitador.permitir(msg.usuario)) {
+          console.warn(`Demasiados mensajes de …${msg.usuario.slice(-4)}; se ignora`);
+          continue;
+        }
         try {
-          await enviar(msg.usuario, await procesar(msg, store, deps));
+          const r = await procesar(msg, store, deps);
+          if (typeof r === "string") await enviar(msg.usuario, r);
+          else await enviarDoc(msg.usuario, r.documento, r.texto);
         } catch (e) {
           console.error("Error procesando mensaje:", e);
           await enviar(msg.usuario, "Tuve un problema procesando eso. Intenta de nuevo, por favor.").catch(() => {});

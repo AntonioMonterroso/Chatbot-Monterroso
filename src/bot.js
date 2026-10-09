@@ -1,6 +1,7 @@
 import { parsearVarios, validarInterpretacion } from "./parser.js";
 import { armarResumen, armarProveedores, armarUltimos, armarDeudas, describir, q } from "./summary.js";
-import { rango, rangoAnterior } from "./tiempo.js";
+import { rango, rangoAnterior, nombreDia, diaLocal } from "./tiempo.js";
+import { armarCsv } from "./exportar.js";
 import { clavePersona } from "./texto.js";
 
 export const AYUDA = `Soy tu asistente de ventas y gastos. Escríbeme, mándame una nota de voz o una foto de una factura:
@@ -12,19 +13,21 @@ Fiado:   le fié 100 a Marta · Marta me pagó 50 · quién me debe
 Crédito: compré 500 a Don Pepe al crédito · pagué 200 a Don Pepe
 Reportes: resumen · ayer · semana · mes · proveedores · últimos
 Errores: deshacer (borra el último) · corrige 120 (cambia su monto)
+Fechas:  el lunes vendí 500 · ayer gasté 80 · resumen del lunes
+Excel:   exportar mes (te mando un archivo para tu contador)
 Meta:    meta 1000 (te muestro el avance en el resumen)
 Equipo:  agrega a 5555 1234 (para que un empleado anote en tu negocio) · equipo
 
 No importa si escribes con faltas. Cada noche te mando el resumen del día; si lo quieres a otra hora, escribe "resumen a las 8".`;
 
 // Lo que un empleado no puede ver ni cambiar
-const SOLO_DUENO = new Set(["resumen", "proveedores", "deudas", "hora", "meta", "equipo", "agregarEmpleado", "quitarEmpleado"]);
+const SOLO_DUENO = new Set(["exportar", "resumen", "proveedores", "deudas", "hora", "meta", "equipo", "agregarEmpleado", "quitarEmpleado"]);
 
-const ETIQUETA_PREVIA = { hoy: "ayer", ayer: "anteayer", semana: "la semana anterior", mes: "el período anterior" };
+const ETIQUETA_PREVIA = { dia: "el día anterior", hoy: "ayer", ayer: "anteayer", semana: "la semana anterior", mes: "el período anterior" };
 
 // Responde a un mensaje de texto. `ahora` se inyecta para poder probar fechas.
 export function responder({ usuario, texto }, store, ahora = new Date()) {
-  return ejecutarVarios(parsearVarios(texto), usuario, store, ahora);
+  return ejecutarVarios(parsearVarios(texto, ahora), usuario, store, ahora);
 }
 
 // Un mensaje puede traer varios movimientos: se anotan todos y se responde con una lista.
@@ -46,9 +49,9 @@ function ejecutarVarios(lista, usuario, store, ahora) {
 // Guarda en el negocio del usuario (un empleado anota en el negocio de su dueño).
 function registrar(p, usuario, store, ahora) {
   const negocio = store.negocioDe(usuario);
-  const { tipo, ayer, ...resto } = p;
-  // "ayer vendí 500" se anota con la fecha de ayer
-  const fecha = new Date(ahora.getTime() - (ayer ? 86_400_000 : 0)).toISOString();
+  const { tipo, hace = 0, ...resto } = p;
+  // "ayer vendí 500" / "el lunes gasté 80" se anotan con esa fecha
+  const fecha = new Date(ahora.getTime() - hace * 86_400_000).toISOString();
   const base = { usuario: negocio, registro: usuario, fecha };
 
   // "pagué 200 a Don Pepe" cuando ya le debías: es un pago de esa deuda, no un gasto nuevo
@@ -81,8 +84,8 @@ function notaDeCuenta(mov, store) {
 }
 
 // Resumen de un período, con comparación contra el anterior (también lo usa el resumen nocturno).
-export function armarResumenDe(store, negocio, periodo, ahora, titulo) {
-  const r = rango(periodo, ahora);
+export function armarResumenDe(store, negocio, periodo, ahora, titulo, hace = 0) {
+  const r = rango(periodo, ahora, hace);
   const previo = rangoAnterior(r);
   return armarResumen(store.entre(negocio, r.desde, r.hasta), titulo ?? r.titulo, {
     previos: store.entre(negocio, previo.desde, previo.hasta),
@@ -104,7 +107,8 @@ function ejecutar(p, usuario, store, ahora) {
     case "gasto": {
       const mov = registrar(p, usuario, store, ahora);
       const titulo = mov.tipo === "abono" ? "Pago registrado ✅ (se descuenta de lo que le debías; no cuenta como gasto nuevo)" : "Anotado ✅";
-      return [`${titulo} ${describir(mov)}.`, notaDeCuenta(mov, store), PIDE_DESHACER].filter(Boolean).join("\n");
+      const fecha = p.hace > 0 ? `Lo anoté con fecha de ${p.hace === 1 ? "ayer" : nombreDia(diaLocal(new Date(mov.fecha)))}.` : "";
+      return [`${titulo} ${describir(mov)}.`, fecha, notaDeCuenta(mov, store), PIDE_DESHACER].filter(Boolean).join("\n");
     }
     case "abono": {
       const deuda = store.saldos(negocio).cobrar.get(clavePersona(p.persona));
@@ -129,13 +133,22 @@ function ejecutar(p, usuario, store, ahora) {
       return c ? `Corregido ✅ ${describir(c.mov)} (antes ${q(c.antes)}).` : "No tengo nada que corregir.";
     }
     case "resumen":
-      return armarResumenDe(store, negocio, p.periodo, ahora);
+      return armarResumenDe(store, negocio, p.periodo, ahora, undefined, p.hace);
     case "ultimos":
       // el dueño ve todo el negocio; un empleado, solo lo suyo
       return armarUltimos(store.ultimos(negocio, 5, dueno ? undefined : usuario), ahora);
     case "proveedores": {
       const r = rango("mes", ahora);
       return armarProveedores(store.entre(negocio, r.desde, r.hasta));
+    }
+    case "exportar": {
+      const r = rango(p.periodo, ahora);
+      const movs = store.entre(negocio, r.desde, r.hasta);
+      if (!movs.length) return "No hay movimientos en ese período para exportar.";
+      return {
+        texto: `Aquí tienes tus ${movs.length} movimientos (${r.desde} al ${r.hasta}). Se abre con Excel o Google Sheets.`,
+        documento: { nombre: `movimientos-${r.desde}-a-${r.hasta}.csv`, mime: "text/csv", buffer: Buffer.from(armarCsv(movs), "utf8") },
+      };
     }
     case "deudas":
       return armarDeudas(store.saldos(negocio));
@@ -185,7 +198,7 @@ function ejecutar(p, usuario, store, ahora) {
 
 // Si el parser local no entiende, le pregunta a la IA (si está configurada).
 async function responderConRespaldo({ usuario, texto }, store, deps, ahora) {
-  const lista = parsearVarios(texto);
+  const lista = parsearVarios(texto, ahora);
   if (lista.length === 1 && lista[0].tipo === "desconocido" && deps.interpretar) {
     try {
       lista[0] = validarInterpretacion(await deps.interpretar(texto)) ?? lista[0];
@@ -196,10 +209,27 @@ async function responderConRespaldo({ usuario, texto }, store, deps, ahora) {
   return ejecutarVarios(lista, usuario, store, ahora);
 }
 
-// Punto de entrada para cualquier tipo de mensaje de WhatsApp.
+export const BIENVENIDA =
+  '¡Hola! 👋 Soy tu asistente para llevar las ventas y gastos de tu restaurante. Escríbeme (o mándame una nota de voz) lo que vendes y gastas, y cada noche te mando el resumen. Escribe "ayuda" para ver todo lo que sé hacer.';
+const MAX_LARGO = 1000;
+
+// Punto de entrada para cualquier tipo de mensaje de WhatsApp. Responde con un texto, o con
+// { texto, documento } cuando hay un archivo que enviar. La primera vez, saluda.
 // deps: { descargarMedia, transcribirAudio, leerRecibo, interpretar } (opcionales)
 export async function procesar(msg, store, deps = {}, ahora = new Date()) {
-  if (msg.tipo === "text") return responderConRespaldo(msg, store, deps, ahora);
+  const respuesta = await procesarMensaje(msg, store, deps, ahora);
+  if (store.config.get(msg.usuario, "bienvenida")) return respuesta;
+  store.config.set(msg.usuario, "bienvenida", true);
+  return typeof respuesta === "string"
+    ? `${BIENVENIDA}\n\n${respuesta}`
+    : { ...respuesta, texto: `${BIENVENIDA}\n\n${respuesta.texto}` };
+}
+
+async function procesarMensaje(msg, store, deps, ahora) {
+  if (msg.tipo === "text") {
+    if (msg.texto.length > MAX_LARGO) return "Ese mensaje es muy largo. Escríbeme algo más corto, por favor.";
+    return responderConRespaldo(msg, store, deps, ahora);
+  }
 
   if (msg.tipo === "audio") {
     if (!deps.descargarMedia || !deps.transcribirAudio) {

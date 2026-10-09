@@ -21,6 +21,7 @@ Estado: en construcción (versión mínima).
 - **Excel para el contador**: `exportar mes` (o `semana`, `ayer`...) manda un archivo CSV por WhatsApp. Las celdas que parecen fórmulas se neutralizan
 - **Bienvenida** la primera vez que alguien escribe
 - **Protección**: `NUMEROS_PERMITIDOS` limita quién puede usar el bot (sus empleados siempre pasan), máximo 20 mensajes por minuto por número, y mensajes de más de 1000 caracteres se rechazan
+- **Precios del menú**: `pollo cuesta 45` y después basta `vendí 3 pollos` (= Q135). Si dices un precio o un total (`vendí 3 pollos a 50`, `vendí 300 de pollo`), manda lo que dijiste. `precios` los lista, `cuánto cuesta el pollo` consulta y `quita el precio del pollo` borra. Solo el dueño los cambia; los empleados los usan
 - **Conversación**: si el bot pregunta ("¿de cuánto fue?"), basta responder `250` o `a Marta`; recuerda la pregunta por 5 minutos
 - **Cuadre de caja**: `caja inicial 200` fija el fondo; al cerrar, cuenta el efectivo y escribe `caja 850`: el bot dice cuánto debería haber y si sobra o falta (la tarjeta, el fiado y el crédito no cuentan como efectivo)
 - **Fiado viejo**: `quién me debe` marca las deudas de una semana o más ("hace 18 días")

@@ -2,6 +2,7 @@ import { parsearMensaje, parsearVarios, validarInterpretacion } from "./parser.j
 import { armarResumen, armarProveedores, armarUltimos, armarDeudas, armarCaja, describir, q } from "./summary.js";
 import { rango, rangoAnterior, nombreDia, diaLocal } from "./tiempo.js";
 import { armarCsv } from "./exportar.js";
+import { aplicarMenu } from "./menu.js";
 import { clavePersona } from "./texto.js";
 
 export const AYUDA = `Soy tu asistente de ventas y gastos. Escríbeme, mándame una nota de voz o una foto de una factura:
@@ -14,6 +15,7 @@ Crédito: compré 500 a Don Pepe al crédito · pagué 200 a Don Pepe
 Reportes: resumen · ayer · semana · mes · proveedores · últimos
 Errores: deshacer (borra el último) · corrige 120 (cambia su monto)
 Fechas:  el lunes vendí 500 · ayer gasté 80 · resumen del lunes
+Precios: pollo cuesta 45 (y luego basta decir "vendí 3 pollos") · precios
 Caja:    caja inicial 200 · caja 850 (cuento y te digo si cuadra)
 Excel:   exportar mes (te mando un archivo para tu contador)
 Meta:    meta 1000 (te muestro el avance en el resumen)
@@ -22,15 +24,18 @@ Equipo:  agrega a 5555 1234 (para que un empleado anote en tu negocio) · equipo
 No importa si escribes con faltas. Cada noche te mando el resumen del día; si lo quieres a otra hora, escribe "resumen a las 8".`;
 
 // Lo que un empleado no puede ver ni cambiar
-const SOLO_DUENO = new Set(["caja", "fondo", "exportar", "resumen", "proveedores", "deudas", "hora", "meta", "equipo", "agregarEmpleado", "quitarEmpleado"]);
+const SOLO_DUENO = new Set(["precio", "quitarPrecio", "caja", "fondo", "exportar", "resumen", "proveedores", "deudas", "hora", "meta", "equipo", "agregarEmpleado", "quitarEmpleado"]);
 
 const ETIQUETA_PREVIA = { dia: "el día anterior", hoy: "ayer", ayer: "anteayer", semana: "la semana anterior", mes: "el período anterior" };
 
 // Responde a un mensaje de texto. `ahora` se inyecta para poder probar fechas.
 export function responder({ usuario, texto }, store, ahora = new Date()) {
   texto = completarPendiente(usuario, texto, store, ahora);
-  return ejecutarVarios(parsearVarios(texto, ahora), usuario, store, ahora, texto);
+  return ejecutarVarios(parsearVarios(texto, ahora, conMenu(usuario, store, ahora)), usuario, store, ahora, texto);
 }
+
+// Reescribe cada tramo de venta con los precios del menú del negocio
+const conMenu = (usuario, store, ahora) => (t) => aplicarMenu(t, store.menu.lista(store.negocioDe(usuario)), ahora);
 
 const VIGENCIA_PENDIENTE_MS = 5 * 60_000;
 
@@ -172,6 +177,21 @@ function ejecutar(p, usuario, store, ahora) {
         documento: { nombre: `movimientos-${r.desde}-a-${r.hasta}.csv`, mime: "text/csv", buffer: Buffer.from(armarCsv(movs), "utf8") },
       };
     }
+    case "precio":
+      store.menu.set(negocio, p.nombre, p.precio);
+      return `Listo ✅ ${p.nombre}: ${q(p.precio)}. Ahora basta escribir, por ejemplo: vendí 3 ${p.nombre}`;
+    case "quitarPrecio":
+      return store.menu.quitar(negocio, p.nombre) ? `Listo, quité el precio de ${p.nombre}.` : `No tengo precio guardado para ${p.nombre}.`;
+    case "consultaPrecio": {
+      const it = store.menu.buscar(negocio, p.nombre);
+      return it ? `${it.nombre}: ${q(it.precio)}` : `No tengo precio guardado para ${p.nombre}. Para ponerlo: ${p.nombre} cuesta 45`;
+    }
+    case "menu": {
+      const lista = store.menu.lista(negocio);
+      return lista.length
+        ? ["Tus precios:", ...lista.map((it) => `- ${it.nombre}: ${q(it.precio)}`), 'Para venderlos solo di: vendí 3 ' + lista[0].nombre].join("\n")
+        : "Todavía no tienes precios guardados. Ejemplo: pollo cuesta 45";
+    }
     case "fondo":
       store.config.set(negocio, "fondo", p.monto);
       return `Fondo de caja: ${q(p.monto)} ✅ Cada día cuento desde ahí. Al cerrar, cuenta lo que hay y escribe: caja 850`;
@@ -216,6 +236,7 @@ function ejecutar(p, usuario, store, ahora) {
       return AYUDA;
     case "sinmonto":
       if (p.fiado) return "¿Cuánto le fiaste? Ejemplo: le fié 100 a Marta";
+      if (p.venta === "precio") return `¿Cuánto cuesta ${p.nombre}? Ejemplo: ${p.nombre} cuesta 45`;
       if (p.venta === "fondo") return "¿Con cuánto dinero abres la caja? Ejemplo: caja inicial 200";
       if (p.venta === "abono") return "¿De cuánto fue el pago? Ejemplo: Marta me pagó 50";
       if (p.venta === "corregir") return "¿Cuál es el monto correcto? Ejemplo: corrige 120";
@@ -230,7 +251,7 @@ function ejecutar(p, usuario, store, ahora) {
 // Si el parser local no entiende, le pregunta a la IA (si está configurada).
 async function responderConRespaldo({ usuario, texto }, store, deps, ahora) {
   texto = completarPendiente(usuario, texto, store, ahora);
-  const lista = parsearVarios(texto, ahora);
+  const lista = parsearVarios(texto, ahora, conMenu(usuario, store, ahora));
   if (lista.length === 1 && lista[0].tipo === "desconocido" && deps.interpretar) {
     try {
       lista[0] = validarInterpretacion(await deps.interpretar(texto)) ?? lista[0];

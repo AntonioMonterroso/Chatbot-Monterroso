@@ -1,10 +1,13 @@
 import { existsSync, copyFileSync } from "node:fs";
 import { diaLocal } from "./tiempo.js";
-import { clavePersona } from "./texto.js";
+import { clavePersona, clave, sinAcentos } from "./texto.js";
 import { aplicar, cargar, compactar, abrirParaAgregar, estadoVacio } from "./diario.js";
 
 // Almacén de datos. Con ruta, persiste en un diario (ver diario.js); con ruta = null vive solo en
 // memoria (tests y chat de terminal). Todo cambio pasa por `commit`: primero al disco, luego a memoria.
+// Un precio se identifica por su primera palabra, sin acentos, en singular y por cómo suena
+const claveMenu = (nombre) => clave(sinAcentos(nombre.toLowerCase()).split(/\s+/)[0].replace(/(?<=\w{3})s$/, ""));
+
 export function crearStore(ruta = "data/diario.jsonl") {
   let datos = estadoVacio();
   let diario = null;
@@ -110,6 +113,18 @@ export function crearStore(ruta = "data/diario.jsonl") {
       if (datos.equipo[telefono] !== dueno) return false;
       commit({ op: "eq-", tel: telefono });
       return true;
+    },
+    // Precios del menú: "pollo cuesta 45" para después poder decir solo "vendí 3 pollos"
+    menu: {
+      lista: (usuario) => Object.values(datos.menu[usuario] ?? {}),
+      set: (usuario, nombre, precio) => commit({ op: "precio", u: usuario, k: claveMenu(nombre), nombre, v: precio }),
+      quitar(usuario, nombre) {
+        const k = claveMenu(nombre);
+        if (!datos.menu[usuario]?.[k]) return false;
+        commit({ op: "precio", u: usuario, k, v: null });
+        return true;
+      },
+      buscar: (usuario, nombre) => datos.menu[usuario]?.[claveMenu(nombre)] ?? null,
     },
     config: {
       get: (usuario, k) => datos.config[usuario]?.[k],

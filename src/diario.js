@@ -8,7 +8,7 @@ import {
 } from "node:fs";
 import { dirname } from "node:path";
 
-export const estadoVacio = () => ({ movimientos: [], meta: {}, config: {}, equipo: {} });
+export const estadoVacio = () => ({ movimientos: [], meta: {}, config: {}, equipo: {}, menu: {} });
 
 // Aplica un cambio al estado en memoria. Es la ÚNICA forma de modificar el estado.
 export function aplicar(datos, op) {
@@ -33,6 +33,12 @@ export function aplicar(datos, op) {
     case "cfg":
       (datos.config[op.u] ??= {})[op.k] = op.v;
       break;
+    case "precio": {
+      const menu = (datos.menu[op.u] ??= {});
+      if (op.v == null) delete menu[op.k];
+      else menu[op.k] = { nombre: op.nombre, precio: op.v };
+      break;
+    }
     case "eq+":
       datos.equipo[op.tel] = op.dueno;
       break;

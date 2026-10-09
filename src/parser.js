@@ -39,6 +39,9 @@ const PERIODO_EXACTO = tabla("hoy", "ayer", "anteayer", "antier");
 const DIAS_SEMANA = new Map([["domingo", 0], ["lunes", 1], ["martes", 2], ["miercoles", 3], ["jueves", 4], ["viernes", 5], ["sabado", 6]]);
 const CAJA = tabla("caja", "cuadre", "arqueo");
 const FONDO = tabla("fondo", "inicial", "base", "apertura", "abri", "abrimos", "arranque");
+const PRECIO_PALABRAS = tabla("cuesta", "cuestan", "vale", "valen", "precio", "precios");
+const PRECIO_RELLENO = new Set(["el", "la", "los", "las", "un", "una", "del", "de", "al", "a", "es", "en", "mi", "mis", "lista", "su", "para", "cuanto", "quita", "quitar", "borra", "borrar", "elimina", "eliminar", "olvida", "de", "q"]);
+const QUITAR = /^(quita|quitar|borra|borrar|elimina|eliminar|olvida)$/;
 const EXPORTAR = tabla("excel", "csv", "exportar", "exporta", "exportame", "descargar", "descarga", "planilla");
 
 // "ayer", "anteayer", "el lunes": cuántos días atrás y qué palabras lo dicen.
@@ -209,6 +212,20 @@ export function parsearMensaje(texto, ahora = new Date()) {
   const abono = detectarAbono(tokens);
   if (abono) return abono;
 
+  // Precios del menú: "pollo cuesta 45", "precios", "cuánto cuesta el pollo", "quita el precio del pollo"
+  if (!hayVerbo(tokens) && tokens.some((t) => !esNumero(t) && buscar(t.n, PRECIO_PALABRAS, false))) {
+    const nombre = tokens
+      .filter((t) => !esNumero(t) && !buscar(t.n, PRECIO_PALABRAS, false) && !PRECIO_RELLENO.has(t.n) && !buscar(t.n, MONEDA))
+      .map((t) => t.o)
+      .join(" ");
+    const nums = tokens.filter(esNumero);
+    if (!nombre) return { tipo: "menu" };
+    if (tokens.some((t) => QUITAR.test(t.n))) return { tipo: "quitarPrecio", nombre };
+    if (nums.length && nums[0].valor > 0) return { tipo: "precio", nombre, precio: redondear(nums[0].valor) };
+    if (tokens.some((t) => t.n === "cuanto")) return { tipo: "consultaPrecio", nombre };
+    return { tipo: "sinmonto", venta: "precio", nombre };
+  }
+
   // "caja 850", "tengo 850 en caja", "cierre de caja", "caja inicial 200".
   // Si hay un verbo ("compré una caja de refresco") es un movimiento, no la caja.
   if (tokens.some((t) => !esNumero(t) && (buscar(t.n, CAJA, false) || t.n === "fondo")) && !hayVerbo(tokens)) {
@@ -364,7 +381,8 @@ export function parsearMensaje(texto, ahora = new Date()) {
 
 // "vendí 100 y gasté 50", "vendí 3 pollos a 45 y 2 cervezas a 20", varias líneas...
 // Devuelve una lista con un resultado por cada movimiento que encuentre.
-export function parsearVarios(texto, ahora = new Date()) {
+// `preparar` (opcional) puede reescribir cada tramo antes de interpretarlo (lo usa el menú de precios).
+export function parsearVarios(texto, ahora = new Date(), preparar = (t) => t) {
   const esVerbo = (n) => !buscar(n, SUSTANTIVOS, false) && !/^fiad[oa]$/.test(n) && !!buscar(n, VERBOS);
   const empiezaConDigito = (n) => /^[q$]?\.?\d/.test(n);
   const empiezaConNumero = (n) => empiezaConDigito(n) || !!valorPalabraNumero(n);
@@ -404,7 +422,7 @@ export function parsearVarios(texto, ahora = new Date()) {
 
     for (const seg of segmentos) {
       const t = seg.join(" ").replace(/(\s+(y|e|le|les|me|se|ya))+$/i, "").trim();
-      if (t) resultados.push(parsearMensaje(t, ahora));
+      if (t) resultados.push(parsearMensaje(preparar(t), ahora));
     }
   }
   return resultados.length ? resultados : [{ tipo: "desconocido" }];

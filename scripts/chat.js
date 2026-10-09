@@ -4,6 +4,9 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { crearStore } from "../src/store.js";
 import { procesar } from "../src/bot.js";
 import { interpretarMensaje } from "../src/ia.js";
+import { cargarEnv } from "../src/env.js";
+
+cargarEnv();
 
 const store = crearStore(process.env.CHAT_DB ?? null); // en memoria por defecto
 // Con ANTHROPIC_API_KEY también prueba el respaldo de IA para mensajes raros.

@@ -1,10 +1,14 @@
 import { createServer } from "node:http";
+import { readFileSync } from "node:fs";
 import { crearStore } from "./store.js";
 import { procesar } from "./bot.js";
 import { extraerMensajes, firmaValida, enviarTexto, enviarDocumento, descargarMedia } from "./whatsapp.js";
 import { crearLimitador } from "./limitador.js";
 import { transcribirAudio, leerRecibo, interpretarMensaje } from "./ia.js";
 import { iniciarResumenNocturno } from "./scheduler.js";
+import { cargarEnv } from "./env.js";
+
+const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
 
 // Voz, foto y el respaldo de IA solo se activan si hay llave configurada.
 function depsDesdeEnv(env) {
@@ -29,8 +33,13 @@ export function crearServidor({ store, env = process.env, enviar = enviarTexto, 
 
   return createServer(async (req, res) => {
     const url = new URL(req.url, "http://localhost");
+    if (url.pathname === "/health") {
+      // para que el servicio donde lo publiques sepa que está vivo; no revela datos del negocio
+      res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ ok: true, version: VERSION, uptime: Math.round(process.uptime()) }));
+      return;
+    }
     if (url.pathname !== "/webhook") {
-      res.writeHead(url.pathname === "/health" ? 200 : 404).end();
+      res.writeHead(404).end();
       return;
     }
 
@@ -48,6 +57,7 @@ export function crearServidor({ store, env = process.env, enviar = enviarTexto, 
       for await (const c of req) chunks.push(c);
       const crudo = Buffer.concat(chunks);
       if (!firmaValida(crudo, req.headers["x-hub-signature-256"], env.WHATSAPP_APP_SECRET)) {
+        console.warn("Mensaje rechazado: la firma de Meta no coincide (¿WHATSAPP_APP_SECRET equivocado?)");
         res.writeHead(401).end();
         return;
       }
@@ -88,6 +98,12 @@ export function crearServidor({ store, env = process.env, enviar = enviarTexto, 
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
+  cargarEnv();
+  // Con WhatsApp real conectado, exigir la firma de Meta: si no, cualquiera podría inventar mensajes
+  if (process.env.WHATSAPP_ACCESS_TOKEN && !process.env.WHATSAPP_APP_SECRET) {
+    console.error("Falta WHATSAPP_APP_SECRET: sin él no se puede verificar que los mensajes vengan de Meta. Corre: npm run verificar");
+    process.exit(1);
+  }
   const port = process.env.PORT ?? 3000;
   const store = crearStore();
   const servidor = crearServidor({ store });

@@ -34,11 +34,16 @@ Estado: en construcción (versión mínima).
 
 Sin las llaves de voz/foto, el bot avisa al usuario que escriba el mensaje.
 
+## Conectarlo a WhatsApp
+
+Guía paso a paso (crear la app en Meta, llenar el `.env`, probar con un túnel, publicarlo con Docker y pasar a producción): **[docs/GUIA.md](docs/GUIA.md)**. `npm run verificar` revisa que la configuración esté completa antes de conectar.
+
 ## Uso
 
 ```
 cp .env.example .env   # llena los valores de WhatsApp Cloud API
-npm start              # webhook en :3000/webhook
+npm run verificar      # revisa la configuración (agrega -- --meta para probar el token con Meta)
+npm start              # webhook en :3000/webhook (y /health)
 npm run chat           # probar por terminal, sin WhatsApp
 npm test
 ```
